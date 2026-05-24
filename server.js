@@ -27,6 +27,14 @@ const dbConfig = {
   queueLimit: 0
 };
 
+// TiDB Cloud requires SSL
+if (process.env.DB_HOST && process.env.DB_HOST.includes('tidbcloud')) {
+  dbConfig.ssl = {
+    minVersion: 'TLSv1.2',
+    rejectUnauthorized: true
+  };
+}
+
 let pool;
 
 // Inicialización de la conexión
