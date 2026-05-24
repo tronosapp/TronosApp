@@ -1,6 +1,6 @@
 /**
  * =========================================================================
- * TRONOS DATABASE ADAPTER (MySQL Integration) - v2.1
+ * TRONOS DATABASE ADAPTER (MySQL Integration) - v2.2
  * =========================================================================
  * Sincroniza automáticamente los datos entre localStorage (offline) y la
  * base de datos MySQL en el servidor (online). 
@@ -38,7 +38,7 @@
   };
 
   // =====================================================================
-  // 2. SINCRONIZACIÓN CON EL SERVIDOR
+  // 2. SINCRONIZACIÓN CON EL SERVIDOR (PUSH)
   // =====================================================================
   let syncTimeout = null;
   
@@ -85,7 +85,7 @@
       const preprogrammedData = state.preprogrammed || [];
       const foldersData = state.folders || [];
 
-      console.log(`🔄 Sincronizando con servidor: ${databaseData.length} servicios, ${preprogrammedData.length} pre-registros, ${foldersData.length} carpetas`);
+      console.log(`🔄 Sincronizando con servidor (Push): ${databaseData.length} servicios, ${preprogrammedData.length} pre-registros, ${foldersData.length} carpetas`);
 
       const response = await fetch(`${API_URL}/api/sync`, {
         method: 'POST',
@@ -117,11 +117,43 @@
   }
 
   // =====================================================================
-  // 3. CARGAR DATOS DEL SERVIDOR AL INICIAR
+  // 3. CARGAR DATOS DEL SERVIDOR (PULL)
   // =====================================================================
-  async function loadStateFromServer() {
+  async function loadStateFromServer(isAutoPull = false) {
+    // Si es auto-pull periódico, verificar si es seguro interrumpir al usuario
+    if (isAutoPull) {
+      if (typeof state === 'undefined') return;
+      
+      // 1. No sincronizar si está editando un registro, o pre-programando, o convirtiendo
+      if (state.editingId !== null || state.convertData !== null) {
+        console.log('ℹ️ Auto-sincronización pausada: El usuario está editando un formulario.');
+        return;
+      }
+      
+      // 2. No sincronizar si está en una vista de formulario activo (programar)
+      if (state.view === 'programar') {
+        return;
+      }
+
+      // 3. No sincronizar si hay algún input, select o textarea enfocado actualmente
+      const activeEl = document.activeElement;
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'SELECT' || activeEl.tagName === 'TEXTAREA')) {
+        console.log('ℹ️ Auto-sincronización pausada: El usuario está escribiendo o interactuando con un control.');
+        return;
+      }
+
+      // 4. No sincronizar si hay un modal de confirmación o alerta en pantalla
+      if (document.querySelector('.fixed.inset-0')) {
+        console.log('ℹ️ Auto-sincronización pausada: Hay un modal abierto.');
+        return;
+      }
+    }
+
     try {
-      console.log('🔄 Conectando con la base de datos MySQL en:', API_URL);
+      if (!isAutoPull) {
+        console.log('🔄 Conectando con la base de datos MySQL en:', API_URL);
+      }
+      
       const response = await fetch(`${API_URL}/api/state`, {
         headers: { 'Accept': 'application/json' }
       });
@@ -145,12 +177,28 @@
       const localHasData = localDB.length > 0 || localPre.length > 0 || localFolders.length > 0;
 
       if (serverHasData) {
-        // El servidor tiene datos → Usarlos (son la fuente de verdad)
-        console.log('📥 Cargando datos del servidor:', 
-          data.database.length, 'servicios,',
-          data.preprogrammed.length, 'pre-registros,',
-          data.folders.length, 'carpetas'
-        );
+        // Si es auto-pull, verificar si los datos realmente cambiaron antes de re-renderizar
+        if (isAutoPull && typeof state !== 'undefined') {
+          const dbStr = JSON.stringify(data.database || []);
+          const preStr = JSON.stringify(data.preprogrammed || []);
+          const fldStr = JSON.stringify(data.folders || []);
+          
+          const currentDbStr = JSON.stringify(state.database || []);
+          const currentPreStr = JSON.stringify(state.preprogrammed || []);
+          const currentFldStr = JSON.stringify(state.folders || []);
+          
+          if (dbStr === currentDbStr && preStr === currentPreStr && fldStr === currentFldStr) {
+            // No hay cambios reales, no molestamos al DOM
+            return;
+          }
+          console.log('🔔 ¡Nuevos datos detectados en la nube! Actualizando interfaz...');
+        } else {
+          console.log('📥 Cargando datos del servidor:', 
+            data.database.length, 'servicios,',
+            data.preprogrammed.length, 'pre-registros,',
+            data.folders.length, 'carpetas'
+          );
+        }
 
         // Guardar en localStorage SIN disparar el sync de vuelta
         originalSetItem.call(localStorage, 'tronos_db_v4', JSON.stringify(data.database || []));
@@ -169,25 +217,29 @@
           render();
         }
 
-        console.log('✅ Datos cargados correctamente desde MySQL');
-      } else if (localHasData) {
-        // El servidor está vacío pero hay datos locales → Subir los locales al servidor
+        if (!isAutoPull) {
+          console.log('✅ Datos cargados correctamente desde MySQL');
+        }
+      } else if (localHasData && !isAutoPull) {
+        // El servidor está vacío pero hay datos locales y es la carga inicial → Subir locales
         console.log('📤 El servidor está vacío. Subiendo datos locales al servidor...');
         await syncToServer();
         console.log('✅ Datos locales sincronizados al servidor');
-      } else {
+      } else if (!isAutoPull) {
         console.log('ℹ️ Sin datos en servidor ni en local. Base de datos vacía.');
       }
     } catch (error) {
-      console.error('❌ No se pudo conectar al servidor:', error.message);
-      if (typeof showToast === 'function') {
-        showToast("Modo offline - Usando almacenamiento local");
+      if (!isAutoPull) {
+        console.error('❌ No se pudo conectar al servidor:', error.message);
+        if (typeof showToast === 'function') {
+          showToast("Modo offline - Usando almacenamiento local");
+        }
       }
     }
   }
 
   // =====================================================================
-  // 4. INICIALIZAR CUANDO EL DOCUMENTO ESTÉ LISTO
+  // 4. INICIALIZAR Y CONFIGURAR EVENTOS Y TEMPORIZADORES
   // =====================================================================
   function init() {
     // Esperar a que las variables y funciones principales de la app estén disponibles
@@ -197,8 +249,26 @@
       return;
     }
     
-    // Cargar datos del servidor
+    // 1. Carga inicial desde el servidor
     loadStateFromServer();
+
+    // 2. Configurar Auto-Pull periódico cada 30 segundos (sólo si la pestaña está activa)
+    setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        loadStateFromServer(true);
+      }
+    }, 30000);
+
+    // 3. Configurar Pull instantáneo cuando el usuario regresa a la pestaña o enfoca la ventana
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        loadStateFromServer(true);
+      }
+    });
+
+    window.addEventListener('focus', () => {
+      loadStateFromServer(true);
+    });
   }
 
   // Usar DOMContentLoaded + setTimeout para asegurar que todo esté cargado
