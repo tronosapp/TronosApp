@@ -1,0 +1,2775 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TRONOS - Gestión de Programación</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f1f5f9; }
+        .input-trono { @apply w-full p-3 border-2 border-slate-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none uppercase transition-all bg-white font-semibold text-sm; }
+        .input-lowercase { text-transform: none !important; }
+        .label-trono { @apply block text-[10px] font-black text-slate-500 mb-1.5 uppercase tracking-widest; }
+        .btn-primary { @apply bg-slate-900 text-white px-6 py-3 rounded-2xl font-bold text-xs uppercase tracking-widest hover:bg-black transition-all active:scale-95 shadow-lg; }
+        .btn-secondary { @apply bg-white text-slate-900 border-2 border-slate-200 px-6 py-3 rounded-2xl font-bold text-xs uppercase hover:bg-slate-50 transition-all; }
+        .section-separator { border-bottom: 3px solid #000 !important; }
+        
+        #toast { visibility: hidden; min-width: 300px; background-color: #0f172a; color: #fff; text-align: center; border-radius: 20px; padding: 20px; position: fixed; z-index: 1000; left: 50%; bottom: 40px; transform: translateX(-50%); font-weight: 800; text-transform: uppercase; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }
+        #toast.show { visibility: visible; animation: fadein 0.5s, fadeout 0.5s 2.5s; }
+        @keyframes fadein { from {bottom: 0; opacity: 0;} to {bottom: 40px; opacity: 1;} }
+        @keyframes fadeout { from {bottom: 40px; opacity: 1;} to {bottom: 0; opacity: 0;} }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <div id="toast"></div>
+
+    <script>
+        const VENDORS = ['M', 'D', 'J', 'OTRO'];
+        const REGISTRO_OPTS = ['M', 'F', 'A', 'D', 'O'];
+        const MODELS = ['ESTANDAR', 'QUEEN', 'FLUSH', 'INCLUYENTE', 'LAVAMANOS'];
+        const PAYMENTS = ['Efectivo', 'Fiscal', 'Efectivo-PO', 'Fiscal-PO'];
+        const MOV_TYPES = ['Limpieza', 'Movimiento', 'Cambio de Sanitario', 'Portacandado', 'Otro'];
+
+        let state = {
+            view: 'login',
+            user: null,
+            database: JSON.parse(localStorage.getItem('tronos_db_v4')) || [],
+            preprogrammed: JSON.parse(localStorage.getItem('tronos_pre_v4')) || [],
+            folders: JSON.parse(localStorage.getItem('tronos_folders_v4')) || [],
+            currentFolder: null,
+            selectedRows: [],
+            filters: { date: '', client: '', status: 'PENDIENTES' },
+            editingId: null,
+            convertData: null,
+            routeStatus: 'PENDIENTES'
+        };
+
+        window.filteredDashData = [];
+
+        function saveState() {
+            localStorage.setItem('tronos_db_v4', JSON.stringify(state.database));
+            localStorage.setItem('tronos_pre_v4', JSON.stringify(state.preprogrammed));
+            localStorage.setItem('tronos_folders_v4', JSON.stringify(state.folders));
+        }
+
+        function showToast(msg) {
+            const t = document.getElementById("toast");
+            t.innerText = msg; t.className = "show";
+            setTimeout(() => { t.className = ""; }, 3000);
+        }
+
+        function showConfirm(message, onConfirm) {
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[2000] flex items-center justify-center animate-in fade-in duration-200';
+            modal.innerHTML = `
+                <div class="bg-white p-6 rounded-3xl shadow-2xl max-w-sm w-full mx-4 text-center transform scale-100 animate-in zoom-in-95 duration-200">
+                    <div class="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <i data-lucide="alert-triangle" class="w-8 h-8"></i>
+                    </div>
+                    <h3 class="font-black text-lg text-slate-900 uppercase tracking-tighter mb-2">Confirmar Acción</h3>
+                    <p class="text-sm text-slate-500 font-medium mb-6">${message}</p>
+                    <div class="flex gap-3">
+                        <button id="btn-cancel-modal" class="flex-1 bg-slate-100 text-slate-700 py-3 rounded-xl font-bold text-xs uppercase hover:bg-slate-200 transition-all">Cancelar</button>
+                        <button id="btn-confirm-modal" class="flex-1 bg-red-500 text-white py-3 rounded-xl font-bold text-xs uppercase hover:bg-red-600 transition-all shadow-lg shadow-red-200">Confirmar</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            lucide.createIcons({root: modal});
+
+            document.getElementById('btn-cancel-modal').onclick = () => modal.remove();
+            document.getElementById('btn-confirm-modal').onclick = () => {
+                onConfirm();
+                modal.remove();
+            };
+        }
+
+        function showInputModal(title, message, defaultValue, onConfirm) {
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[2000] flex items-center justify-center animate-in fade-in duration-200';
+            modal.innerHTML = `
+                <div class="bg-white p-6 rounded-3xl shadow-2xl max-w-sm w-full mx-4 transform scale-100 animate-in zoom-in-95 duration-200">
+                    <h3 class="font-black text-lg text-slate-900 uppercase tracking-tighter mb-2 text-center">${title}</h3>
+                    <p class="text-xs text-slate-500 font-bold mb-4 text-center uppercase">${message}</p>
+                    <input type="text" id="modal_input_val" class="input-trono mb-6" value="${defaultValue}">
+                    <div class="flex gap-3">
+                        <button id="btn-cancel-in" class="flex-1 bg-slate-100 text-slate-700 py-3 rounded-xl font-bold text-xs uppercase hover:bg-slate-200 transition-all">Cancelar</button>
+                        <button id="btn-confirm-in" class="flex-1 bg-blue-600 text-white py-3 rounded-xl font-bold text-xs uppercase hover:bg-blue-700 transition-all shadow-lg shadow-blue-200">Guardar</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            const input = document.getElementById('modal_input_val');
+            input.focus();
+            document.getElementById('btn-cancel-in').onclick = () => modal.remove();
+            document.getElementById('btn-confirm-in').onclick = () => {
+                const val = input.value.trim().toUpperCase();
+                if(val) onConfirm(val);
+                modal.remove();
+            };
+        }
+
+        // --- EXPANSOR VIRTUAL UNIVERSAL (Aplica a todas las categorías) ---
+        function getExpandedDatabase() {
+            let expandedData = [];
+            state.database.forEach(item => {
+                let mainProds = [];
+                let extraLocs = {};
+                (item.productos || []).forEach(p => {
+                    if (p.n_dir) {
+                        if (!extraLocs[p.n_dir]) extraLocs[p.n_dir] = { prods: [], firstProd: p };
+                        extraLocs[p.n_dir].prods.push(p);
+                    } else {
+                        mainProds.push(p);
+                    }
+                });
+
+                // Fila Principal
+                if (mainProds.length > 0 || Object.keys(extraLocs).length === 0) {
+                    expandedData.push({
+                        ...item,
+                        _ref: item,
+                        _isSub: false,
+                        _subDir: null,
+                        _folderId: item.folderId || null,
+                        productos: mainProds.length > 0 ? mainProds : item.productos
+                    });
+                }
+
+                // Filas Adicionales
+                for (const [dir, data] of Object.entries(extraLocs)) {
+                    if (!item.extra_status) item.extra_status = {};
+                    
+                    let subItem = {
+                        ...item,
+                        _ref: item,
+                        _isSub: true,
+                        _subDir: dir,
+                        _folderId: (item.extra_folderId && item.extra_folderId[dir]) ? item.extra_folderId[dir] : null,
+                        obra: data.firstProd.n_obra || item.obra,
+                        contacto: data.firstProd.n_cont || item.contacto,
+                        direccion: dir,
+                        ubicacion: data.firstProd.n_ubi || item.ubicacion,
+                        status: item.extra_status[dir] || 'PENDIENTE',
+                        productos: data.prods
+                    };
+
+                    // Extraer checks de Hitos si el adicional pertenece a un EVENTO
+                    if (item.type === 'EVENTO') {
+                        if (!item.extra_chk_entrega) item.extra_chk_entrega = {};
+                        if (!item.extra_chk_limpieza) item.extra_chk_limpieza = {};
+                        if (!item.extra_chk_retiro) item.extra_chk_retiro = {};
+                        
+                        subItem.chk_entrega = item.extra_chk_entrega[dir] || false;
+                        subItem.chk_limpieza = item.extra_chk_limpieza[dir] || false;
+                        subItem.chk_retiro = item.extra_chk_retiro[dir] || false;
+                    }
+
+                    expandedData.push(subItem);
+                }
+            });
+            return expandedData;
+        }
+
+        function render() {
+            const root = document.getElementById('root');
+            root.innerHTML = '';
+
+            if (state.view === 'login') return renderLogin(root);
+
+            const container = document.createElement('div');
+            container.className = 'max-w-7xl mx-auto p-4 md:p-8 min-h-screen animate-in fade-in duration-300';
+
+            const header = document.createElement('div');
+            header.className = 'flex flex-col md:flex-row justify-between items-center mb-8 bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 gap-4';
+            header.innerHTML = `
+                <div class="text-center md:text-left">
+                    <h1 class="text-3xl font-[900] tracking-tighter text-slate-900 leading-none">TRONOS</h1>
+                    <p class="text-[9px] font-black text-blue-500 uppercase tracking-widest mt-1">Gestión de Logística</p>
+                </div>
+                <div class="flex items-center gap-3">
+                    ${state.view !== 'dashboard' ? `
+                        <button onclick="goToMenu()" class="btn-primary flex items-center gap-2 py-2 px-4 text-[10px]">
+                            <i data-lucide="layout-grid" class="w-4 h-4"></i> INICIO
+                        </button>
+                    ` : ''}
+                    <button onclick="logout()" class="p-3 bg-red-50 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all shadow-sm" title="Cerrar Sesión">
+                        <i data-lucide="log-out" class="w-5 h-5"></i>
+                    </button>
+                </div>
+            `;
+            container.appendChild(header);
+
+            const content = document.createElement('div');
+            content.className = 'w-full';
+            container.appendChild(content);
+            root.appendChild(container);
+
+            switch(state.view) {
+                case 'dashboard': renderDashboard(content); break;
+                case 'preprogramar': renderPreprogramar(content); break;
+                case 'programar': renderProgramar(content); break;
+                case 'programacion_fecha': renderProgramacionFecha(content); break;
+                case 'reportes': renderReportes(content); break;
+                case 'base_datos': renderBaseDatos(content); break;
+            }
+
+            lucide.createIcons();
+        }
+
+        function renderLogin(root) {
+            root.innerHTML = `
+                <div class="min-h-screen flex items-center justify-center p-6 bg-slate-900 animate-in zoom-in duration-500">
+                    <div class="bg-white p-10 rounded-[3rem] shadow-2xl w-full max-w-md text-center border-4 border-slate-800 relative overflow-hidden">
+                        <div class="absolute top-0 left-0 w-full h-2 bg-blue-500"></div>
+                        <h1 class="text-5xl font-[900] tracking-tighter mb-2 text-slate-900">TRONOS</h1>
+                        <p class="text-slate-400 font-bold text-[10px] uppercase tracking-[0.3em] mb-10">Portal de Administración</p>
+                        <div class="space-y-6 text-left relative z-10">
+                            <div><label class="label-trono">Usuario</label><input type="text" id="login_user" class="input-trono text-center text-lg shadow-inner" value="TRONOS"></div>
+                            <div><label class="label-trono">Contraseña</label><input type="password" id="login_pass" class="input-trono text-center text-lg shadow-inner" onkeydown="if(event.key==='Enter') doLogin()"></div>
+                            <button onclick="doLogin()" class="w-full bg-blue-600 text-white py-4 rounded-2xl font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-xl shadow-blue-200 mt-4 active:scale-95">Ingresar al Sistema</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function doLogin() {
+            const u = document.getElementById('login_user').value;
+            const p = document.getElementById('login_pass').value;
+            if (u === 'TRONOS' && p === 'RENTA') { state.user = 'TRONOS'; state.view = 'dashboard'; render(); }
+            else { showToast("Credenciales Incorrectas"); }
+        }
+
+        function logout() { state.user = null; state.view = 'login'; render(); }
+        function goToMenu() { state.editingId = null; state.convertData = null; state.view = 'dashboard'; render(); }
+
+        function renderDashboard(content) {
+            const preCount = state.preprogrammed.length;
+            const expandedDB = getExpandedDatabase();
+            const pendingCount = expandedDB.filter(x => x.status !== 'COMPLETADO' && x.status !== 'LISTO').length;
+            
+            content.innerHTML = `
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+                    <button onclick="state.view='preprogramar'; render()" class="bg-white p-6 md:p-8 rounded-[2.5rem] shadow-sm hover:shadow-xl hover:-translate-y-2 transition-all border border-slate-100 text-center group relative overflow-hidden">
+                        <div class="absolute -right-4 -top-4 w-24 h-24 bg-amber-50 rounded-full opacity-50 group-hover:scale-150 transition-transform duration-500"></div>
+                        <div class="w-16 h-16 bg-amber-100 text-amber-600 rounded-2xl flex items-center justify-center mx-auto mb-6 group-hover:bg-amber-500 group-hover:text-white transition-colors relative z-10 shadow-inner">
+                            <i data-lucide="clock" class="w-8 h-8"></i>
+                        </div>
+                        <h3 class="font-black text-slate-900 uppercase tracking-tighter text-lg md:text-xl relative z-10">Preprogramar</h3>
+                        <p class="text-[10px] text-slate-400 font-bold mt-2 uppercase relative z-10">En espera: <span class="text-amber-500">${preCount}</span></p>
+                    </button>
+                    
+                    <button onclick="state.view='programar'; render()" class="bg-white p-6 md:p-8 rounded-[2.5rem] shadow-sm hover:shadow-xl hover:-translate-y-2 transition-all border border-slate-100 text-center group relative overflow-hidden">
+                        <div class="absolute -right-4 -top-4 w-24 h-24 bg-blue-50 rounded-full opacity-50 group-hover:scale-150 transition-transform duration-500"></div>
+                        <div class="w-16 h-16 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-6 group-hover:bg-blue-600 group-hover:text-white transition-colors relative z-10 shadow-inner">
+                            <i data-lucide="calendar-plus" class="w-8 h-8"></i>
+                        </div>
+                        <h3 class="font-black text-slate-900 uppercase tracking-tighter text-lg md:text-xl relative z-10">Programar</h3>
+                        <p class="text-[10px] text-slate-400 font-bold mt-2 uppercase relative z-10">Crear Servicio</p>
+                    </button>
+                    
+                    <button onclick="state.view='programacion_fecha'; render()" class="bg-white p-6 md:p-8 rounded-[2.5rem] shadow-sm hover:shadow-xl hover:-translate-y-2 transition-all border border-slate-100 text-center group relative overflow-hidden">
+                        <div class="absolute -right-4 -top-4 w-24 h-24 bg-emerald-50 rounded-full opacity-50 group-hover:scale-150 transition-transform duration-500"></div>
+                        <div class="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-6 group-hover:bg-emerald-500 group-hover:text-white transition-colors relative z-10 shadow-inner">
+                            <i data-lucide="truck" class="w-8 h-8"></i>
+                        </div>
+                        <h3 class="font-black text-slate-900 uppercase tracking-tighter text-lg md:text-xl relative z-10">Logística</h3>
+                        <p class="text-[10px] text-slate-400 font-bold mt-2 uppercase relative z-10">Rutas Diarias</p>
+                    </button>
+                    
+                    <button onclick="state.view='reportes'; render()" class="bg-white p-6 md:p-8 rounded-[2.5rem] shadow-sm hover:shadow-xl hover:-translate-y-2 transition-all border border-slate-100 text-center group relative overflow-hidden">
+                        <div class="absolute -right-4 -top-4 w-24 h-24 bg-indigo-50 rounded-full opacity-50 group-hover:scale-150 transition-transform duration-500"></div>
+                        <div class="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-6 group-hover:bg-indigo-500 group-hover:text-white transition-colors relative z-10 shadow-inner">
+                            <i data-lucide="bar-chart-3" class="w-8 h-8"></i>
+                        </div>
+                        <h3 class="font-black text-slate-900 uppercase tracking-tighter text-lg md:text-xl relative z-10">Reportes</h3>
+                        <p class="text-[10px] text-slate-400 font-bold mt-2 uppercase relative z-10">Métricas y PDF</p>
+                    </button>
+                </div>
+                
+                <div class="mt-8">
+                    <button onclick="state.view='base_datos'; render()" class="w-full bg-slate-900 text-white p-6 md:p-8 rounded-[2.5rem] flex flex-col md:flex-row items-center justify-between hover:bg-black transition-all shadow-xl group">
+                        <div class="flex items-center gap-6 mb-4 md:mb-0">
+                            <div class="bg-white/10 p-4 rounded-2xl group-hover:bg-white/20 transition-colors">
+                                <i data-lucide="database" class="w-8 h-8 text-blue-400"></i>
+                            </div>
+                            <div class="text-left">
+                                <h3 class="font-black uppercase text-xl leading-tight tracking-tight">Base de Datos General</h3>
+                                <p class="text-[10px] opacity-60 font-bold uppercase tracking-widest mt-1">Histórico completo de movimientos</p>
+                            </div>
+                        </div>
+                        <div class="flex gap-4">
+                            <div class="bg-slate-800 px-6 py-3 rounded-2xl font-black text-xs border border-slate-700 shadow-inner">
+                                <span class="text-blue-400">${expandedDB.length}</span> FILAS
+                            </div>
+                            <div class="bg-slate-800 px-6 py-3 rounded-2xl font-black text-xs border border-slate-700 shadow-inner">
+                                <span class="text-amber-400">${pendingCount}</span> PENDIENTES
+                            </div>
+                        </div>
+                    </button>
+                </div>
+            `;
+        }
+
+        // ---------- PREPROGRAMACIÓN ----------
+        function renderPreprogramar(content) {
+            content.innerHTML = `
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    <div class="lg:col-span-1 bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 h-fit sticky top-4">
+                        <h2 class="text-xl font-black uppercase tracking-tighter mb-6 border-b-2 border-slate-100 pb-4 flex items-center gap-2"><i data-lucide="edit-3" class="w-5 h-5 text-amber-500"></i> Nuevo Pre-Registro</h2>
+                        <div class="space-y-5">
+                            <div><label class="label-trono">Fecha Estimada</label><input type="date" id="pre_date" class="input-trono bg-slate-50"></div>
+                            <div><label class="label-trono">Método de Pago</label><select id="pre_pay" class="input-trono bg-slate-50">${PAYMENTS.map(p => `<option value="${p}">${p}</option>`).join('')}</select></div>
+                            <div><label class="label-trono">Nombre del Cliente</label><input type="text" id="pre_client" class="input-trono bg-slate-50" placeholder="Ej. CONSTRUCTORA ABC"></div>
+                            <div><label class="label-trono">Teléfono / Contacto</label><input type="text" id="pre_contact" class="input-trono bg-slate-50" placeholder="Ej. 999 123 4567"></div>
+                            <div class="flex gap-3 pt-6 border-t border-slate-100">
+                                <button onclick="savePre()" class="flex-1 bg-amber-500 text-white px-6 py-4 rounded-2xl font-bold text-xs uppercase tracking-widest hover:bg-amber-600 transition-all shadow-lg shadow-amber-200">Guardar</button>
+                                <button onclick="clearPre()" class="btn-secondary px-4"><i data-lucide="eraser" class="w-5 h-5"></i></button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="lg:col-span-2 bg-white rounded-[2.5rem] border border-slate-100 overflow-hidden shadow-sm flex flex-col h-full min-h-[500px]">
+                        <div class="p-6 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-center gap-4">
+                            <h2 class="font-black uppercase tracking-tighter text-lg flex items-center gap-2"><i data-lucide="list" class="w-5 h-5 text-slate-400"></i> Lista de Espera</h2>
+                            <div class="relative w-full sm:w-auto">
+                                <i data-lucide="search" class="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400"></i>
+                                <input type="text" id="pre_search" placeholder="Buscar cliente..." class="input-trono text-xs py-2.5 pl-10 w-full sm:w-64 bg-white" oninput="filterPre()">
+                            </div>
+                        </div>
+                        <div id="pre_list" class="overflow-x-auto flex-1 bg-white"></div>
+                    </div>
+                </div>
+            `;
+            filterPre();
+        }
+
+        function savePre() {
+            const cliente = document.getElementById('pre_client').value.trim();
+            const contacto = document.getElementById('pre_contact').value.trim();
+            
+            const data = {
+                id: Date.now(),
+                fecha: document.getElementById('pre_date').value || '',
+                pago: document.getElementById('pre_pay').value || 'Efectivo',
+                cliente: cliente ? cliente.toUpperCase() : '',
+                contacto: contacto ? contacto.toUpperCase() : '',
+                status: 'PRE'
+            };
+            state.preprogrammed.push(data);
+            saveState();
+            clearPre();
+            filterPre();
+            showToast("PRE-REGISTRO GUARDADO");
+        }
+
+        function clearPre() { 
+            document.getElementById('pre_date').value = ''; 
+            document.getElementById('pre_client').value = ''; 
+            document.getElementById('pre_contact').value = ''; 
+        }
+
+        function filterPre() {
+            const search = document.getElementById('pre_search')?.value.toUpperCase() || '';
+            const list = state.preprogrammed.filter(p => 
+                (p.cliente && p.cliente.includes(search)) || 
+                (p.contacto && p.contacto.includes(search))
+            ).sort((a, b) => new Date(a.fecha || 0) - new Date(b.fecha || 0));
+            
+            const cont = document.getElementById('pre_list');
+            if(list.length === 0) { 
+                cont.innerHTML = `
+                    <div class="flex flex-col items-center justify-center h-full p-20 text-slate-300">
+                        <i data-lucide="inbox" class="w-16 h-16 mb-4 opacity-50"></i>
+                        <div class="font-black uppercase text-sm tracking-widest">Lista vacía</div>
+                        <div class="text-[10px] font-bold mt-2">No hay registros pendientes.</div>
+                    </div>`; 
+                lucide.createIcons();
+                return; 
+            }
+            
+            cont.innerHTML = `
+                <table class="w-full text-xs">
+                    <thead class="bg-slate-50 text-[10px] font-black uppercase text-slate-400 sticky top-0 border-b border-slate-200 shadow-sm">
+                        <tr>
+                            <th class="p-4 pl-6 text-left whitespace-nowrap">Fecha Est.</th>
+                            <th class="p-4 text-left">Cliente / Detalles</th>
+                            <th class="p-4 pr-6 text-right">Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        ${list.map(p => `
+                            <tr class="hover:bg-blue-50/50 transition-colors group">
+                                <td class="p-4 pl-6">
+                                    <div class="font-bold text-slate-700 bg-slate-100 inline-block px-3 py-1 rounded-lg border border-slate-200 whitespace-nowrap">
+                                        ${p.fecha ? new Date(p.fecha).toLocaleDateString('es-ES', {timeZone:'UTC'}) : 'SIN FECHA'}
+                                    </div>
+                                </td>
+                                <td class="p-4">
+                                    <div class="font-black text-slate-900 text-sm">${p.cliente || 'SIN NOMBRE'}</div>
+                                    <div class="text-[10px] text-slate-500 font-semibold mt-1 flex items-center gap-1">
+                                        <i data-lucide="phone" class="w-3 h-3"></i> ${p.contacto || 'N/A'} &bull; <span class="text-blue-500">${p.pago}</span>
+                                    </div>
+                                </td>
+                                <td class="p-4 pr-6 text-right">
+                                    <div class="flex justify-end gap-2 opacity-100 sm:opacity-50 sm:group-hover:opacity-100 transition-opacity">
+                                        <button onclick="convertToProg(${p.id})" class="bg-emerald-100 text-emerald-700 p-2.5 rounded-xl hover:bg-emerald-500 hover:text-white transition-all shadow-sm" title="Convertir a Servicio Real">
+                                            <i data-lucide="arrow-right-circle" class="w-5 h-5"></i>
+                                        </button>
+                                        <button onclick="showConfirm('¿Seguro que deseas eliminar este pre-registro?', function() { deletePre(${p.id}); })" class="bg-red-50 text-red-500 p-2.5 rounded-xl hover:bg-red-500 hover:text-white transition-all shadow-sm" title="Eliminar Pre-registro">
+                                            <i data-lucide="trash-2" class="w-5 h-5"></i>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>`;
+            lucide.createIcons();
+        }
+
+        function convertToProg(id) {
+            const item = state.preprogrammed.find(x => x.id === id);
+            state.convertData = item;
+            state.view = 'programar';
+            render();
+        }
+
+        function deletePre(id) { 
+            state.preprogrammed = state.preprogrammed.filter(x => x.id !== id); 
+            saveState(); 
+            filterPre(); 
+            showToast("Pre-registro eliminado");
+        } 
+
+        // ---------- PROGRAMACIÓN DE SERVICIOS ----------
+        function renderProgramar(content) {
+            content.innerHTML = `
+                <div class="flex flex-col items-center animate-in slide-in-from-bottom-8 duration-500">
+                    <div class="text-center mb-10">
+                        <h2 class="text-4xl font-black uppercase tracking-tighter text-slate-900">${state.convertData ? 'Convertir Registro' : 'Nueva Programación'}</h2>
+                        <p class="text-slate-500 font-bold text-xs uppercase tracking-widest mt-2">Selecciona la categoría del servicio</p>
+                    </div>
+                    
+                    ${state.convertData ? `
+                        <div class="bg-amber-100 border-2 border-amber-300 text-amber-900 p-4 rounded-2xl mb-8 w-full max-w-2xl flex items-center justify-between shadow-sm">
+                            <div class="text-left">
+                                <div class="text-[9px] font-black uppercase tracking-widest opacity-70 mb-1">Cargando datos de:</div>
+                                <div class="font-black text-sm uppercase">${state.convertData.cliente || 'Sin Nombre'}</div>
+                            </div>
+                            <button onclick="state.convertData = null; render()" class="text-amber-700 hover:text-red-600 p-2"><i data-lucide="x-circle" class="w-5 h-5"></i></button>
+                        </div>
+                    ` : ''}
+                    
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 w-full mb-10 max-w-5xl">
+                        <button onclick="renderSubForm('EVENTO')" class="bg-white p-6 md:p-8 rounded-[2rem] border-2 border-slate-100 hover:border-blue-500 hover:shadow-2xl transition-all font-black text-[10px] md:text-xs uppercase group relative overflow-hidden">
+                            <div class="absolute -bottom-10 -right-10 w-32 h-32 bg-blue-50 rounded-full group-hover:scale-[2] transition-transform duration-700 z-0"></div>
+                            <i data-lucide="star" class="w-10 h-10 mb-4 text-blue-500 group-hover:scale-125 transition-transform mx-auto relative z-10"></i>
+                            <span class="relative z-10">Eventos</span>
+                        </button>
+                        <button onclick="renderSubForm('ENTREGAS DE OBRA')" class="bg-white p-6 md:p-8 rounded-[2rem] border-2 border-slate-100 hover:border-emerald-500 hover:shadow-2xl transition-all font-black text-[10px] md:text-xs uppercase group relative overflow-hidden">
+                            <div class="absolute -bottom-10 -right-10 w-32 h-32 bg-emerald-50 rounded-full group-hover:scale-[2] transition-transform duration-700 z-0"></div>
+                            <i data-lucide="truck" class="w-10 h-10 mb-4 text-emerald-500 group-hover:scale-125 transition-transform mx-auto relative z-10"></i>
+                            <span class="relative z-10">Entregas Obra</span>
+                        </button>
+                        <button onclick="renderSubForm('RETIROS DE OBRA')" class="bg-white p-6 md:p-8 rounded-[2rem] border-2 border-slate-100 hover:border-red-500 hover:shadow-2xl transition-all font-black text-[10px] md:text-xs uppercase group relative overflow-hidden">
+                            <div class="absolute -bottom-10 -right-10 w-32 h-32 bg-red-50 rounded-full group-hover:scale-[2] transition-transform duration-700 z-0"></div>
+                            <i data-lucide="package-minus" class="w-10 h-10 mb-4 text-red-500 group-hover:scale-125 transition-transform mx-auto relative z-10"></i>
+                            <span class="relative z-10">Retiros Obra</span>
+                        </button>
+                        <button onclick="renderSubForm('MOVIMIENTO')" class="bg-white p-6 md:p-8 rounded-[2rem] border-2 border-slate-100 hover:border-indigo-500 hover:shadow-2xl transition-all font-black text-[10px] md:text-xs uppercase group relative overflow-hidden">
+                            <div class="absolute -bottom-10 -right-10 w-32 h-32 bg-indigo-50 rounded-full group-hover:scale-[2] transition-transform duration-700 z-0"></div>
+                            <i data-lucide="refresh-cw" class="w-10 h-10 mb-4 text-indigo-500 group-hover:scale-125 transition-transform mx-auto relative z-10"></i>
+                            <span class="relative z-10">Movimientos</span>
+                        </button>
+                    </div>
+                    <div id="subFormCont" class="w-full max-w-5xl"></div>
+                </div>
+            `;
+            lucide.createIcons();
+            if(state.editingId) {
+                const item = state.database.find(x => x.id === state.editingId);
+                if(item) renderSubForm(item.type, item);
+            }
+        }
+
+        function renderSubForm(type, editData = null) {
+            const data = editData || state.convertData || {};
+            const isEvent = type === 'EVENTO';
+            const isEntrega = type === 'ENTREGAS DE OBRA';
+            const isRetiro = type === 'RETIROS DE OBRA';
+            const isMov = type === 'MOVIMIENTO';
+
+            let themeColor = isEvent ? 'blue' : isEntrega ? 'emerald' : isRetiro ? 'red' : 'indigo';
+
+            const cont = document.getElementById('subFormCont');
+            cont.innerHTML = `
+                <div class="bg-white p-6 md:p-10 rounded-[3rem] shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-300 relative overflow-hidden">
+                    <div class="absolute top-0 left-0 w-full h-3 bg-${themeColor}-500"></div>
+                    
+                    <div class="flex justify-between items-center mb-10 mt-2">
+                        <div>
+                            <h3 class="text-2xl font-black uppercase text-slate-900 flex items-center gap-3">
+                                <i data-lucide="${isEvent?'star':isEntrega?'truck':isRetiro?'package-minus':'refresh-cw'}" class="w-6 h-6 text-${themeColor}-500"></i>
+                                ${editData ? 'Editando' : 'Nuevo'} ${type}
+                            </h3>
+                            ${editData ? `<p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">ID: ${editData.id}</p>` : ''}
+                        </div>
+                        <button onclick="document.getElementById('subFormCont').innerHTML=''" class="p-3 bg-slate-100 text-slate-500 hover:bg-red-100 hover:text-red-500 rounded-xl transition-colors">
+                            <i data-lucide="x" class="w-5 h-5"></i>
+                        </button>
+                    </div>
+
+                    <form id="mainForm" onsubmit="event.preventDefault(); saveForm('${type}')" class="grid grid-cols-1 md:grid-cols-2 gap-6 relative z-10">
+                        
+                        <!-- SECCION GENERAL -->
+                        <div class="md:col-span-2 bg-slate-50 p-6 rounded-3xl border border-slate-200 grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div class="md:col-span-2 border-b border-slate-200 pb-2 mb-2"><h4 class="font-black text-xs uppercase tracking-widest text-slate-400">Datos Generales</h4></div>
+                            
+                            <div><label class="label-trono">Fecha del Servicio</label><input type="date" id="f_f" value="${data.fecha || ''}" class="input-trono bg-white" required></div>
+                            <div><label class="label-trono">Método de Pago</label><select id="f_p" class="input-trono bg-white">${PAYMENTS.map(p => `<option value="${p}" ${data.pago === p ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
+                            ${!isMov ? `<div><label class="label-trono">${isRetiro ? 'Registró' : 'Vendedor'}</label><select id="f_v" class="input-trono bg-white">${(isRetiro ? REGISTRO_OPTS : VENDORS).map(v => `<option value="${v}" ${(data.vendedor || 'M') === v ? 'selected' : ''}>${v}</option>`).join('')}</select></div>` : ''}
+                            ${isEvent ? `<div><label class="label-trono">Número de Cotización</label><input type="text" id="f_cot" value="${data.cot || ''}" class="input-trono bg-white" placeholder="Opcional"></div>` : ''}
+                            ${isMov ? `<div><label class="label-trono">Tipo de Movimiento</label><select id="f_mov_t" class="input-trono bg-white">${MOV_TYPES.map(m => `<option value="${m}" ${data.tipo_mov === m ? 'selected' : ''}>${m}</option>`).join('')}</select></div>` : ''}
+                            ${isRetiro ? `<div><label class="label-trono">Motivo de Retiro</label><select id="f_motivo" class="input-trono bg-white"><option value="TO" ${data.motivo==='TO'?'selected':''}>Termino de Obra (TO)</option><option value="SUSP" ${data.motivo==='SUSP'?'selected':''}>Suspendido (SUSP)</option><option value="MP" ${data.motivo==='MP'?'selected':''}>Mal Pago (MP)</option><option value="OTRO" ${data.motivo==='OTRO'?'selected':''}>Otro</option></select></div>` : ''}
+                        </div>
+
+                        <!-- SECCION CLIENTE -->
+                        <div class="md:col-span-2 flex flex-col gap-6 w-full">
+                            <div class="w-full"><label class="label-trono">Cliente / Razón Social</label><input type="text" id="f_c" value="${data.cliente || ''}" class="input-trono w-full" required placeholder="Nombre de la empresa o persona"></div>
+                            
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 w-full">
+                                <div><label class="label-trono">Contacto (Nombre y Teléfono)</label><input type="text" id="f_cont" value="${data.contacto || ''}" class="input-trono w-full" required placeholder="Ej. Juan Pérez - 999 000 1111"></div>
+                                ${isEntrega || isRetiro || isMov ? `<div><label class="label-trono">Obra (Operador y Ruta)</label><input type="text" id="f_obra" value="${data.obra || ''}" class="input-trono w-full" placeholder="Ej. Juan Pérez - Ruta 1"></div>` : '<div class="hidden md:block"></div>'}
+                            </div>
+
+                            ${isEntrega ? `<div class="w-full"><label class="label-trono text-emerald-600">Contacto de quién contrata (Se mostrará al Completar)</label><input type="text" id="f_cont_contrata" value="${data.cont_contrata || ''}" class="input-trono w-full border-emerald-200 bg-emerald-50 focus:border-emerald-500" placeholder="Ej. Arq. Carlos - 999 111 2222"></div>` : ''}
+                            
+                            <div class="w-full"><label class="label-trono">Dirección Principal</label><input type="text" id="f_dir" value="${data.direccion || ''}" class="input-trono w-full" required placeholder="Calle, Número, Cruzamientos, Colonia"></div>
+                            <div class="w-full"><label class="label-trono">Link de Ubicación (Google Maps)</label><input type="url" id="f_ubi" value="${data.ubicacion || ''}" class="input-trono input-lowercase text-blue-600 w-full" placeholder="https://maps.app.goo.gl/..."></div>
+                        </div>
+
+                        <!-- SECCION PRODUCTOS -->
+                        <div class="md:col-span-2 border-t-2 border-slate-100 pt-8 mt-2">
+                            <div class="flex justify-between items-center mb-6">
+                                <h4 class="font-black text-sm uppercase tracking-widest text-slate-800 flex items-center gap-2"><i data-lucide="box" class="w-5 h-5 text-slate-400"></i> Sanitarios / Productos</h4>
+                                <button type="button" onclick="addProdRow('${type}')" class="bg-${themeColor}-100 text-${themeColor}-700 font-black text-[10px] uppercase flex items-center gap-2 hover:bg-${themeColor}-500 hover:text-white px-4 py-2 rounded-xl transition-all shadow-sm">
+                                    <i data-lucide="plus" class="w-4 h-4"></i> Añadir Unidad
+                                </button>
+                            </div>
+                            <div id="prods_list" class="space-y-4"></div>
+                        </div>
+
+                        <!-- SECCION LOGISTICA EVENTOS (Fechas/Horas/Limpiezas) -->
+                        ${isEvent ? `
+                        <div class="md:col-span-2 bg-blue-50 p-6 md:p-8 rounded-3xl border border-blue-100 mt-4">
+                            <h4 class="font-black text-sm uppercase tracking-widest text-blue-800 mb-6 flex items-center gap-2"><i data-lucide="clock" class="w-5 h-5"></i> Logística de Evento</h4>
+                            
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-6 mb-8 bg-white p-4 rounded-2xl shadow-sm border border-blue-50">
+                                <div><label class="label-trono">Horario Entrega (De)</label><input type="time" id="f_h_e" value="${data.h_e||''}" class="input-trono bg-slate-50"></div>
+                                <div><label class="label-trono">Horario Entrega (A)</label><input type="time" id="f_h_e_m" value="${data.h_e_m||''}" class="input-trono bg-slate-50"></div>
+                                <div class="col-span-2 border-l pl-4 md:col-span-2 md:border-l-0 md:pl-0"><label class="label-trono text-red-500">Fecha de Retiro</label><input type="date" id="f_f_r" value="${data.f_r||''}" class="input-trono border-red-200 bg-red-50 focus:border-red-500"></div>
+                                <div><label class="label-trono">Horario Retiro (De)</label><input type="time" id="f_h_r" value="${data.h_r||''}" class="input-trono bg-slate-50"></div>
+                                <div><label class="label-trono">Horario Retiro (A)</label><input type="time" id="f_h_r_m" value="${data.h_r_m||''}" class="input-trono bg-slate-50"></div>
+                            </div>
+                            
+                            <div class="border-t border-blue-200 pt-6">
+                                <div class="flex justify-between items-center mb-4">
+                                    <label class="label-trono mb-0 text-blue-800">Limpiezas Intermedias Programadas</label>
+                                    <button type="button" onclick="addLimpRow()" class="bg-blue-200 text-blue-800 font-black text-[10px] uppercase flex items-center gap-1 hover:bg-blue-600 hover:text-white px-3 py-1.5 rounded-lg transition-all">
+                                        <i data-lucide="calendar-plus" class="w-3 h-3"></i> Añadir
+                                    </button>
+                                </div>
+                                <div id="limp_list" class="space-y-3"></div>
+                                <div id="limp_empty" class="text-[10px] font-bold text-blue-400 uppercase hidden">Sin limpiezas intermedias</div>
+                            </div>
+                        </div>` : ''}
+
+                        <!-- BOTONES ACCION -->
+                        <div class="md:col-span-2 flex flex-col sm:flex-row gap-4 pt-10 border-t-2 border-slate-100 mt-4">
+                            <button type="submit" class="flex-1 bg-${themeColor}-600 text-white py-5 rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-${themeColor}-700 transition-all shadow-xl shadow-${themeColor}-200 flex justify-center items-center gap-2">
+                                <i data-lucide="save" class="w-5 h-5"></i> ${editData ? 'Actualizar Registro Completo' : 'Guardar y Finalizar'}
+                            </button>
+                            <button type="button" onclick="goToMenu()" class="btn-secondary py-5 sm:w-1/3">Cancelar</button>
+                        </div>
+                    </form>
+                </div>
+            `;
+            
+            const prodList = document.getElementById('prods_list');
+            if(data.productos && data.productos.length > 0) {
+                data.productos.forEach(p => addProdRow(type, p));
+            } else {
+                addProdRow(type); 
+            }
+            
+            if(isEvent) {
+                if(data.limpiezas && data.limpiezas.length > 0) {
+                    data.limpiezas.forEach(l => addLimpRow(l));
+                } else {
+                    document.getElementById('limp_empty').classList.remove('hidden');
+                }
+            }
+            lucide.createIcons();
+        }
+
+        function addProdRow(type, pData = null) {
+            const cont = document.getElementById('prods_list');
+            const div = document.createElement('div');
+            div.className = 'bg-slate-50 p-5 md:p-6 rounded-2xl border-2 border-dashed border-slate-300 relative group transition-all hover:border-slate-400';
+            const isEvent = type === 'EVENTO';
+            const hasExtraDir = pData && (pData.n_dir || pData.n_cont || pData.n_obra);
+            
+            div.innerHTML = `
+                <button type="button" onclick="this.closest('.bg-slate-50').remove()" class="absolute -top-3 -right-3 bg-red-100 text-red-500 rounded-full p-1.5 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500 hover:text-white shadow-sm z-10" title="Eliminar producto">
+                    <i data-lucide="x" class="w-4 h-4"></i>
+                </button>
+                <div class="flex flex-col sm:flex-row gap-4 items-end w-full">
+                    <div class="flex flex-row gap-3 w-full sm:flex-1">
+                        <div class="w-20 shrink-0">
+                            <label class="label-trono text-center">Cant.</label>
+                            <input type="number" min="1" max="99999" class="input-trono p_cant text-center text-lg shadow-inner bg-white px-1" value="${pData?pData.cant:1}" oninput="if(this.value.length > 5) this.value = this.value.slice(0,5);">
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <label class="label-trono">Modelo</label>
+                            <select class="input-trono p_mod bg-white">${MODELS.map(m => `<option value="${m}" ${pData&&pData.modelo===m?'selected':''}>${m}</option>`).join('')}</select>
+                        </div>
+                    </div>
+                    <div class="flex flex-row gap-3 w-full sm:w-auto shrink-0">
+                        <div class="flex-1 sm:w-28 shrink-0">
+                            <label class="label-trono text-center invisible hidden sm:block">Extra</label>
+                            <button type="button" onclick="toggleSym(this)" data-active="${pData?pData.sym:'false'}" class="w-full h-[48px] rounded-xl border-2 font-black text-[9px] uppercase transition-all flex items-center justify-center gap-2 p_sym ${pData&&pData.sym?'bg-blue-600 text-white border-blue-600 shadow-md':'bg-white text-slate-500 border-slate-200'}">
+                                <i data-lucide="${isEvent?'zap':'lock'}" class="w-4 h-4"></i><span class="sm:hidden lg:inline">${isEvent?'Lámpara':'Candado'}</span>
+                            </button>
+                        </div>
+                        <div class="flex-1 sm:w-40 shrink-0">
+                            <label class="label-trono invisible hidden sm:block">Extra Dir</label>
+                            <button type="button" onclick="toggleExtraDir(this)" class="w-full h-[48px] btn-secondary text-[9px] py-0 flex items-center justify-center gap-2 border-slate-300 ${hasExtraDir?'bg-slate-200 border-slate-400':''}">
+                                <i data-lucide="map-pin" class="w-4 h-4"></i> Dirección
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="extra_dir ${hasExtraDir ? '' : 'hidden'} mt-6 bg-white p-4 rounded-xl border border-slate-200 shadow-sm relative w-full">
+                    <div class="absolute -top-3 left-6 bg-slate-200 text-[8px] font-black uppercase px-2 py-1 rounded text-slate-600">Ubicación Adicional para esta unidad</div>
+                    <div class="flex flex-col gap-4 mt-2 w-full">
+                        <div class="w-full">
+                            <label class="label-trono">Dirección Específica Adicional</label>
+                            <input type="text" placeholder="Calle, Número, Colonia..." class="input-trono p_n_dir bg-slate-50 text-xs w-full" value="${pData?pData.n_dir||'':''}">
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
+                            <div>
+                                <label class="label-trono">Contacto en sitio</label>
+                                <input type="text" placeholder="Nombre y Teléfono..." class="input-trono p_n_cont bg-slate-50 text-xs w-full" value="${pData?pData.n_cont||'':''}">
+                            </div>
+                            ${type!=='EVENTO'?`
+                            <div>
+                                <label class="label-trono">Obra (Operador y Ruta)</label>
+                                <input type="text" placeholder="Ej. Juan Pérez - Ruta 1" class="input-trono p_n_obra bg-slate-50 text-xs w-full" value="${pData ? (pData.n_obra || '') : ''}">
+                            </div>`: '<div class="hidden md:block"></div>'}
+                        </div>
+                        <div class="w-full">
+                            <label class="label-trono">Link de Ubicación (Maps)</label>
+                            <input type="url" placeholder="https://maps.app.goo.gl/..." class="input-trono input-lowercase p_n_ubi bg-slate-50 text-xs text-blue-600 w-full" value="${pData?pData.n_ubi||'':''}">
+                        </div>
+                    </div>
+                </div>
+            `;
+            cont.appendChild(div);
+            lucide.createIcons({root: div});
+        }
+
+        function toggleExtraDir(btn) {
+            const container = btn.closest('.bg-slate-50').querySelector('.extra_dir');
+            container.classList.toggle('hidden');
+            if(!container.classList.contains('hidden')) {
+                btn.classList.add('bg-slate-200', 'border-slate-400');
+            } else {
+                btn.classList.remove('bg-slate-200', 'border-slate-400');
+            }
+        }
+
+        function toggleSym(btn) { 
+            const act = btn.dataset.active === 'true'; 
+            btn.dataset.active = !act;
+            if(!act) {
+                btn.classList.add('bg-blue-600', 'text-white', 'border-blue-600', 'shadow-md');
+                btn.classList.remove('bg-white', 'text-slate-500', 'border-slate-200');
+            } else {
+                btn.classList.remove('bg-blue-600', 'text-white', 'border-blue-600', 'shadow-md');
+                btn.classList.add('bg-white', 'text-slate-500', 'border-slate-200');
+            }
+        }
+
+        function addLimpRow(lData = null) {
+            const cont = document.getElementById('limp_list');
+            document.getElementById('limp_empty')?.classList.add('hidden');
+            const div = document.createElement('div');
+            div.className = 'flex items-center gap-3 bg-white p-2 pl-4 rounded-xl border border-blue-100 shadow-sm';
+            div.innerHTML = `
+                <i data-lucide="droplets" class="w-4 h-4 text-blue-400"></i>
+                <input type="date" class="input-trono l_date py-2 bg-transparent border-none shadow-none focus:ring-0 text-sm" value="${lData?lData.fecha:''}" required>
+                <input type="time" class="input-trono l_time py-2 bg-transparent border-none shadow-none focus:ring-0 text-sm border-l border-slate-200 rounded-none" value="${lData?lData.hora:''}">
+                <button type="button" onclick="this.parentElement.remove(); if(document.getElementById('limp_list').children.length===0) document.getElementById('limp_empty').classList.remove('hidden');" class="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg ml-auto transition-colors">
+                    <i data-lucide="trash" class="w-4 h-4"></i>
+                </button>`;
+            cont.appendChild(div);
+            lucide.createIcons({root: div});
+        }
+
+        function saveForm(type) {
+            const isEvent = type === 'EVENTO';
+            const isEntrega = type === 'ENTREGAS DE OBRA';
+            
+            const prodRows = Array.from(document.querySelectorAll('#prods_list > div'));
+            if(prodRows.length === 0) {
+                return showToast("Agrega al menos un producto");
+            }
+            
+            const productos = prodRows.map(row => ({
+                cant: parseInt(row.querySelector('.p_cant').value) || 1, 
+                modelo: row.querySelector('.p_mod').value, 
+                sym: row.querySelector('.p_sym').dataset.active === 'true',
+                n_dir: row.querySelector('.p_n_dir').value.toUpperCase(), 
+                n_cont: row.querySelector('.p_n_cont').value.toUpperCase(), 
+                n_obra: row.querySelector('.p_n_obra')?.value.toUpperCase() || '', 
+                n_ubi: row.querySelector('.p_n_ubi').value
+            }));
+
+            const entry = {
+                id: state.editingId || Date.now(), 
+                type,
+                fecha: document.getElementById('f_f').value, 
+                pago: document.getElementById('f_p').value,
+                vendedor: document.getElementById('f_v')?.value || 'N/A', 
+                cliente: document.getElementById('f_c').value.toUpperCase(),
+                contacto: document.getElementById('f_cont').value.toUpperCase(), 
+                cont_contrata: isEntrega ? (document.getElementById('f_cont_contrata')?.value.toUpperCase() || '') : '',
+                direccion: document.getElementById('f_dir').value.toUpperCase(),
+                ubicacion: document.getElementById('f_ubi').value, 
+                cot: document.getElementById('f_cot')?.value || '',
+                obra: document.getElementById('f_obra')?.value.toUpperCase() || '', 
+                motivo: document.getElementById('f_motivo')?.value || '',
+                tipo_mov: document.getElementById('f_mov_t')?.value || '', 
+                status: state.editingId ? state.database.find(x=>x.id===state.editingId).status : 'PENDIENTE', 
+                updated: new Date().toISOString(),
+                productos: productos
+            };
+            
+            if(state.editingId) {
+                const prev = state.database.find(x => x.id === state.editingId);
+                if(prev.extra_status) entry.extra_status = prev.extra_status;
+                if(prev.chk_entrega !== undefined) entry.chk_entrega = prev.chk_entrega;
+                if(prev.chk_limpieza !== undefined) entry.chk_limpieza = prev.chk_limpieza;
+                if(prev.chk_retiro !== undefined) entry.chk_retiro = prev.chk_retiro;
+                
+                if(prev.extra_chk_entrega) entry.extra_chk_entrega = prev.extra_chk_entrega;
+                if(prev.extra_chk_limpieza) entry.extra_chk_limpieza = prev.extra_chk_limpieza;
+                if(prev.extra_chk_retiro) entry.extra_chk_retiro = prev.extra_chk_retiro;
+                
+                if(prev.folderId !== undefined) entry.folderId = prev.folderId;
+                if(prev.extra_folderId !== undefined) entry.extra_folderId = prev.extra_folderId;
+            }
+
+            if(isEvent) {
+                entry.h_e = document.getElementById('f_h_e').value; 
+                entry.h_e_m = document.getElementById('f_h_e_m').value;
+                entry.h_r = document.getElementById('f_h_r').value; 
+                entry.h_r_m = document.getElementById('f_h_r_m').value;
+                entry.f_r = document.getElementById('f_f_r').value;
+                entry.limpiezas = Array.from(document.querySelectorAll('#limp_list > div')).map(row => ({ 
+                    fecha: row.querySelector('.l_date').value, 
+                    hora: row.querySelector('.l_time').value 
+                }));
+            }
+
+            if(state.editingId) { 
+                const idx = state.database.findIndex(x => x.id === state.editingId); 
+                state.database[idx] = entry; 
+            } else { 
+                state.database.push(entry); 
+                if(state.convertData) {
+                    state.preprogrammed = state.preprogrammed.filter(x => x.id !== state.convertData.id); 
+                }
+            }
+            
+            state.editingId = null; 
+            state.convertData = null; 
+            saveState(); 
+            showToast("REGISTRO GUARDADO CON ÉXITO"); 
+            state.view = 'base_datos'; 
+            render();
+        }
+
+        // ---------- NUEVO: GESTION DE CARPETAS Y ARCHIVADO ----------
+        function renderFolders() {
+            const cont = document.getElementById('folders_container');
+            if(!cont) return;
+
+            let bcHTML = `<button onclick="navFolder(null)" class="hover:text-blue-600 transition-colors flex items-center gap-1"><i data-lucide="home" class="w-4 h-4 mb-0.5"></i> INICIO</button>`;
+            if(state.currentFolder) {
+                let path = [];
+                let curr = state.folders.find(f => f.id === state.currentFolder);
+                while(curr) {
+                    path.unshift(curr);
+                    curr = state.folders.find(f => f.id === curr.parentId);
+                }
+                path.forEach(p => {
+                    bcHTML += `<span class="text-slate-300 mx-1">/</span> <button onclick="navFolder('${p.id}')" class="hover:text-blue-600 transition-colors truncate max-w-[100px]">${p.name}</button>`;
+                });
+            }
+
+            let children = state.folders.filter(f => f.parentId === state.currentFolder);
+            children.sort((a,b) => a.name.localeCompare(b.name));
+
+            let foldersHTML = '';
+            if(children.length === 0) {
+                foldersHTML = `<div class="text-[10px] font-bold text-slate-400 uppercase italic w-full text-center py-4">Carpeta Vacía</div>`;
+            } else {
+                foldersHTML = children.map(f => `
+                    <div class="flex items-center gap-3 p-3 pr-4 bg-slate-50 rounded-xl border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all group cursor-pointer min-w-[150px]">
+                        <div onclick="navFolder('${f.id}')" class="flex items-center gap-2 flex-1 overflow-hidden">
+                            <i data-lucide="folder" class="w-5 h-5 text-blue-500 fill-blue-100 shrink-0"></i>
+                            <span class="text-xs font-black uppercase text-slate-700 truncate">${f.name}</span>
+                        </div>
+                        <button onclick="showRenameFolderModal('${f.id}')" class="text-slate-300 hover:text-amber-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" title="Renombrar"><i data-lucide="edit-2" class="w-3 h-3"></i></button>
+                        <button onclick="deleteFolder('${f.id}')" class="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" title="Eliminar"><i data-lucide="trash" class="w-3 h-3"></i></button>
+                    </div>
+                `).join('');
+            }
+
+            cont.innerHTML = `
+                <div class="flex justify-between items-center mb-4 border-b border-slate-100 pb-4">
+                    <div class="flex items-center gap-1 text-sm font-black uppercase text-slate-700 overflow-x-auto">
+                        ${bcHTML}
+                    </div>
+                    <button onclick="showNewFolderModal()" class="bg-blue-50 text-blue-600 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 hover:text-white transition-all flex items-center gap-2 shrink-0 shadow-sm"><i data-lucide="folder-plus" class="w-4 h-4"></i> Nueva Carpeta</button>
+                </div>
+                <div class="flex flex-wrap gap-4">
+                    ${foldersHTML}
+                </div>
+            `;
+            lucide.createIcons({root: cont});
+        }
+
+        function navFolder(id) {
+            state.currentFolder = id;
+            state.selectedRows = [];
+            renderFolders();
+            filterDB();
+        }
+
+        function showNewFolderModal() {
+            showInputModal("NUEVA CARPETA", "Ingresa el nombre de la carpeta", "", function(name) {
+                state.folders.push({ id: 'F'+Date.now(), name: name, parentId: state.currentFolder });
+                saveState();
+                renderFolders();
+                showToast("CARPETA CREADA");
+            });
+        }
+
+        function showRenameFolderModal(id) {
+            const f = state.folders.find(x => x.id === id);
+            if(!f) return;
+            showInputModal("RENOMBRAR CARPETA", "Modifica el nombre", f.name, function(name) {
+                f.name = name;
+                saveState();
+                renderFolders();
+                showToast("CARPETA RENOMBRADA");
+            });
+        }
+
+        function deleteFolder(id) {
+            showConfirm("¿Eliminar carpeta? Los registros dentro volverán a su carpeta principal o al INICIO.", function() {
+                state.database.forEach(item => {
+                    if(item.folderId === id) delete item.folderId;
+                    if(item.extra_folderId) {
+                        for(const k in item.extra_folderId) {
+                            if(item.extra_folderId[k] === id) delete item.extra_folderId[k];
+                        }
+                    }
+                });
+                
+                const f = state.folders.find(x=>x.id === id);
+                if (state.currentFolder === id) {
+                    state.currentFolder = f.parentId;
+                }
+                state.folders.forEach(child => {
+                    if(child.parentId === id) child.parentId = f.parentId;
+                });
+                state.folders = state.folders.filter(x => x.id !== id);
+                saveState();
+                renderFolders();
+                filterDB();
+                showToast("CARPETA ELIMINADA");
+            });
+        }
+
+        function toggleSelectAll(cb) {
+            const rowChks = document.querySelectorAll('.row-chk');
+            if (cb.checked) {
+                rowChks.forEach(c => {
+                    c.checked = true;
+                    if(!state.selectedRows.includes(c.value)) state.selectedRows.push(c.value);
+                });
+            } else {
+                rowChks.forEach(c => {
+                    c.checked = false;
+                    state.selectedRows = state.selectedRows.filter(v => v !== c.value);
+                });
+            }
+            updateMoverButton();
+        }
+
+        function toggleRowSelection(cb) {
+            if (cb.checked) {
+                if(!state.selectedRows.includes(cb.value)) state.selectedRows.push(cb.value);
+            } else {
+                state.selectedRows = state.selectedRows.filter(v => v !== cb.value);
+            }
+            const rowChks = document.querySelectorAll('.row-chk');
+            let allChecked = rowChks.length > 0;
+            rowChks.forEach(c => { if(!c.checked) allChecked = false; });
+            const chkAll = document.getElementById('chk_all');
+            if(chkAll) chkAll.checked = allChecked;
+            updateMoverButton();
+        }
+
+        function updateMoverButton() {
+            const btn = document.getElementById('btn_mover');
+            const count = document.getElementById('sel_count');
+            if(btn && count) {
+                if(state.selectedRows.length > 0) {
+                    btn.classList.remove('hidden');
+                    count.innerText = state.selectedRows.length;
+                } else {
+                    btn.classList.add('hidden');
+                }
+            }
+        }
+
+        function showMoveModal() {
+            if(state.selectedRows.length === 0) return;
+            
+            let opts = `<option value="root">INICIO (Quitar de carpeta)</option>`;
+            
+            const buildPath = (fId) => {
+                let path = [];
+                let curr = state.folders.find(f => f.id === fId);
+                while(curr) {
+                    path.unshift(curr.name);
+                    curr = state.folders.find(f => f.id === curr.parentId);
+                }
+                return path.join(' / ');
+            };
+
+            let fList = state.folders.map(f => ({ id: f.id, path: buildPath(f.id) })).sort((a,b) => a.path.localeCompare(b.path));
+            fList.forEach(f => {
+                opts += `<option value="${f.id}">${f.path}</option>`;
+            });
+
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[2000] flex items-center justify-center animate-in fade-in duration-200';
+            modal.innerHTML = `
+                <div class="bg-white p-6 rounded-3xl shadow-2xl max-w-sm w-full mx-4 transform scale-100 animate-in zoom-in-95 duration-200">
+                    <h3 class="font-black text-lg text-slate-900 uppercase tracking-tighter mb-2 text-center">Mover Elementos</h3>
+                    <p class="text-xs text-slate-500 font-bold mb-4 text-center uppercase">Mover ${state.selectedRows.length} registros a:</p>
+                    <select id="modal_move_dest" class="input-trono mb-6">${opts}</select>
+                    <div class="flex gap-3">
+                        <button id="btn-cancel-mv" class="flex-1 bg-slate-100 text-slate-700 py-3 rounded-xl font-bold text-xs uppercase hover:bg-slate-200 transition-all">Cancelar</button>
+                        <button id="btn-confirm-mv" class="flex-1 bg-indigo-600 text-white py-3 rounded-xl font-bold text-xs uppercase hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200">Mover</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            
+            document.getElementById('btn-cancel-mv').onclick = () => modal.remove();
+            document.getElementById('btn-confirm-mv').onclick = () => {
+                const dest = document.getElementById('modal_move_dest').value;
+                const destId = dest === 'root' ? null : dest;
+                
+                state.selectedRows.forEach(val => {
+                    const parts = val.split('|');
+                    const id = parseInt(parts[0]);
+                    const subDir = decodeURIComponent(parts[1] || '');
+                    
+                    let item = state.database.find(x => x.id === id);
+                    if(item) {
+                        if (subDir) {
+                            if(!item.extra_folderId) item.extra_folderId = {};
+                            if (destId === null) {
+                                delete item.extra_folderId[subDir];
+                            } else {
+                                item.extra_folderId[subDir] = destId;
+                            }
+                        } else {
+                            item.folderId = destId;
+                        }
+                    }
+                });
+                
+                state.selectedRows = [];
+                saveState();
+                filterDB();
+                modal.remove();
+                showToast("REGISTROS MOVIDOS");
+            };
+        }
+
+        // ---------- BASE DE DATOS ----------
+        function renderBaseDatos(container) {
+            container.innerHTML = `
+                <div class="flex flex-col md:flex-row justify-between items-end mb-8 px-2 gap-4">
+                    <div>
+                        <h2 class="text-3xl font-black uppercase tracking-tighter text-slate-900 flex items-center gap-3"><i data-lucide="database" class="w-8 h-8 text-blue-500"></i> Base de Datos</h2>
+                        <p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Histórico completo de movimientos y servicios</p>
+                    </div>
+                </div>
+                
+                <!-- CONTENEDOR DE CARPETAS -->
+                <div id="folders_container" class="bg-white rounded-[2rem] border border-slate-200 shadow-sm p-6 mb-8 animate-in fade-in duration-300"></div>
+                
+                <div class="bg-white rounded-[2rem] border border-slate-200 shadow-xl overflow-hidden flex flex-col min-h-[60vh] relative">
+                    <div class="p-4 md:p-6 bg-slate-50 border-b border-slate-200 flex flex-wrap gap-4 items-center justify-between sticky top-0 z-20 shadow-sm">
+                        <div class="flex flex-wrap gap-3 w-full xl:w-auto">
+                            <div class="relative flex-grow lg:flex-grow-0">
+                                <i data-lucide="search" class="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400"></i>
+                                <input type="text" id="db_search" placeholder="Buscar cliente, obra, dir..." class="input-trono text-xs py-2 pl-10 w-full lg:w-64 bg-white" oninput="filterDB()">
+                            </div>
+                            <input type="date" id="db_date" class="input-trono text-xs py-2 w-auto bg-white" onchange="filterDB()">
+                            
+                            <!-- FILTRO MES -->
+                            <select id="db_month" class="input-trono text-xs py-2 w-auto bg-white" onchange="filterDB()">
+                                <option value="">MES (TODOS)</option>
+                                <option value="01">Enero</option>
+                                <option value="02">Febrero</option>
+                                <option value="03">Marzo</option>
+                                <option value="04">Abril</option>
+                                <option value="05">Mayo</option>
+                                <option value="06">Junio</option>
+                                <option value="07">Julio</option>
+                                <option value="08">Agosto</option>
+                                <option value="09">Septiembre</option>
+                                <option value="10">Octubre</option>
+                                <option value="11">Noviembre</option>
+                                <option value="12">Diciembre</option>
+                            </select>
+
+                            <select id="db_type" class="input-trono text-xs py-2 w-auto bg-white" onchange="filterDB()">
+                                <option value="TODOS">Todas Categorías</option>
+                                <option value="EVENTO">Eventos</option>
+                                <option value="ENTREGAS DE OBRA">Entregas Obra</option>
+                                <option value="RETIROS DE OBRA">Retiros Obra</option>
+                                <option value="MOVIMIENTO">Movimientos</option>
+                            </select>
+                        </div>
+                        
+                        <div class="flex flex-col xl:flex-row gap-3 w-full xl:w-auto items-center mt-4 xl:mt-0">
+                            <!-- Botón Mover -->
+                            <button id="btn_mover" onclick="showMoveModal()" class="hidden bg-indigo-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-md flex items-center gap-2"><i data-lucide="folder-input" class="w-4 h-4"></i> Mover (<span id="sel_count">0</span>)</button>
+                            
+                            <!-- TABS -->
+                            <div class="flex bg-slate-200 p-1 rounded-xl w-full xl:w-auto">
+                                <button onclick="setStatusFilter('PENDIENTES', this)" class="flex-1 lg:flex-none px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all db-tab bg-white shadow text-blue-600">Pendientes</button>
+                                <button onclick="setStatusFilter('COMPLETADOS', this)" class="flex-1 lg:flex-none px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all db-tab text-slate-500 hover:text-slate-700">Completados</button>
+                                <button onclick="setStatusFilter('TODOS', this)" class="flex-1 lg:flex-none px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all db-tab text-slate-500 hover:text-slate-700">Todos</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="db_list" class="overflow-x-auto flex-1 bg-white relative"></div>
+                </div>
+            `;
+            state.filters.status = 'PENDIENTES';
+            renderFolders();
+            lucide.createIcons();
+            filterDB();
+        }
+
+        function setStatusFilter(status, btn) {
+            state.filters.status = status;
+            document.querySelectorAll('.db-tab').forEach(b => {
+                b.classList.remove('bg-white', 'shadow', 'text-blue-600');
+                b.classList.add('text-slate-500');
+            });
+            btn.classList.add('bg-white', 'shadow', 'text-blue-600');
+            btn.classList.remove('text-slate-500');
+            filterDB();
+        }
+
+        function filterDB() {
+            const search = document.getElementById('db_search')?.value.toUpperCase() || '';
+            const date = document.getElementById('db_date')?.value || '';
+            const month = document.getElementById('db_month')?.value || '';
+            const type = document.getElementById('db_type')?.value || 'TODOS';
+            const statusF = state.filters.status;
+
+            let expandedDB = getExpandedDatabase();
+
+            let list = expandedDB.filter(item => {
+                let match = true;
+                if (search && !(item.cliente||'').includes(search) && !(item.obra||'').toUpperCase().includes(search) && !(item.direccion||'').includes(search)) match = false;
+                if (date && item.fecha !== date) match = false;
+                
+                if (month && item.fecha) {
+                    if (item.fecha.split('-')[1] !== month) match = false;
+                }
+
+                if (type !== 'TODOS' && item.type !== type) match = false;
+                if (statusF === 'PENDIENTES' && (item.status === 'COMPLETADO' || item.status === 'LISTO')) match = false;
+                if (statusF === 'COMPLETADOS' && (item.status !== 'COMPLETADO' && item.status !== 'LISTO')) match = false;
+                
+                if (state.currentFolder === null) {
+                    if (item._folderId !== null && item._folderId !== undefined) match = false;
+                } else {
+                    if (item._folderId !== state.currentFolder) match = false;
+                }
+
+                return match;
+            });
+
+            list.sort((a, b) => new Date(a.fecha || 0) - new Date(b.fecha || 0));
+
+            const cont = document.getElementById('db_list');
+            if (list.length === 0) {
+                cont.innerHTML = `
+                    <div class="flex flex-col items-center justify-center h-full p-20 text-slate-300 w-full absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
+                        <i data-lucide="search-x" class="w-16 h-16 mb-4 opacity-50"></i>
+                        <div class="font-black uppercase text-sm tracking-widest">Sin resultados</div>
+                        <div class="text-[10px] font-bold mt-2">Prueba cambiando los filtros.</div>
+                    </div>`;
+                lucide.createIcons();
+                
+                const chkAllNode = document.getElementById('chk_all');
+                if (chkAllNode) chkAllNode.checked = false;
+                
+                updateMoverButton();
+                return;
+            }
+
+            let tableHTML = `
+                <table class="w-full text-xs min-w-[1050px]">
+                    <thead class="bg-white text-[9px] font-black uppercase text-slate-400 sticky top-0 border-b-2 border-slate-100 z-10 shadow-sm">
+                        <tr>
+                            <th class="p-4 pl-6 text-center w-12 border-r border-slate-100">
+                                <input type="checkbox" id="chk_all" class="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 cursor-pointer" onclick="toggleSelectAll(this)">
+                            </th>
+                            <th class="p-4 pl-4 text-left w-24">Estado</th>
+                            <th class="p-4 text-left w-28">Fecha/Tipo</th>
+                            <th class="p-4 text-left w-64">Cliente / Obra</th>
+                            <th class="p-4 text-left w-64">Dirección</th>
+                            <th class="p-4 text-center">Unids.</th>
+                            <th class="p-4 pr-6 text-right w-32">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+            `;
+
+            list.forEach(item => {
+                const isComp = item.status === 'COMPLETADO' || item.status === 'LISTO';
+                const totalUnits = item.productos ? item.productos.reduce((sum, p) => sum + parseInt(p.cant||0), 0) : 0;
+                
+                let typeColor = 'slate';
+                let typeIcon = 'box';
+                if(item.type === 'EVENTO') { typeColor = 'blue'; typeIcon = 'star'; }
+                if(item.type === 'ENTREGAS DE OBRA') { typeColor = 'emerald'; typeIcon = 'truck'; }
+                if(item.type === 'RETIROS DE OBRA') { typeColor = 'red'; typeIcon = 'package-minus'; }
+                if(item.type === 'MOVIMIENTO') { typeColor = 'indigo'; typeIcon = 'refresh-cw'; }
+
+                let subDirEnc = item._subDir ? encodeURIComponent(item._subDir).replace(/'/g, "%27") : '';
+                let subDirArgHito = item._isSub ? `, decodeURIComponent('${subDirEnc}')` : `, ''`;
+                let subDirArgStatus = item._isSub ? `, decodeURIComponent('${subDirEnc}')` : `, ''`;
+                
+                let checkboxValue = `${item.id}|${subDirEnc}`;
+                let isChecked = state.selectedRows.includes(checkboxValue);
+
+                let checkHTML = '';
+                if (isComp) {
+                    checkHTML = `<input type="checkbox" class="row-chk w-4 h-4 text-blue-600 rounded border-slate-300 cursor-pointer" value="${checkboxValue}" ${isChecked ? 'checked' : ''} onchange="toggleRowSelection(this)">`;
+                } else {
+                    checkHTML = `<div class="w-4 h-4 mx-auto rounded border border-slate-200 bg-slate-100 opacity-40 cursor-not-allowed" title="Debe estar Completado para poder moverlo"></div>`;
+                }
+
+                let statusColHTML = '';
+                if (item.type === 'EVENTO') {
+                    let origItem = item._ref;
+                    let cEnt = item._isSub ? (origItem.extra_chk_entrega && origItem.extra_chk_entrega[item._subDir]) : origItem.chk_entrega;
+                    let cLim = item._isSub ? (origItem.extra_chk_limpieza && origItem.extra_chk_limpieza[item._subDir]) : origItem.chk_limpieza;
+                    let cRet = item._isSub ? (origItem.extra_chk_retiro && origItem.extra_chk_retiro[item._subDir]) : origItem.chk_retiro;
+                    
+                    cEnt = cEnt || false;
+                    cLim = cLim || false;
+                    cRet = cRet || false;
+
+                    if (isComp && cEnt === false && cLim === false && cRet === false) {
+                        cEnt = true; cLim = true; cRet = true;
+                    }
+
+                    statusColHTML = `
+                        <div class="flex flex-col gap-1.5 w-full">
+                            <button onclick="toggleHito(${item.id}, 'chk_entrega'${subDirArgHito})" class="w-full flex items-center justify-between px-2 py-1.5 rounded-lg border transition-all ${cEnt ? 'bg-blue-50 border-blue-400 text-blue-600 shadow-inner' : 'bg-white border-slate-200 text-slate-400 hover:border-blue-300'}" title="Confirmar Entrega">
+                                <span class="text-[9px] font-black uppercase">Entr.</span>
+                                <i data-lucide="${cEnt ? 'check-square' : 'square'}" class="w-3 h-3"></i>
+                            </button>
+                            <button onclick="toggleHito(${item.id}, 'chk_limpieza'${subDirArgHito})" class="w-full flex items-center justify-between px-2 py-1.5 rounded-lg border transition-all ${cLim ? 'bg-cyan-50 border-cyan-400 text-cyan-600 shadow-inner' : 'bg-white border-slate-200 text-slate-400 hover:border-cyan-300'}" title="Confirmar Limpieza">
+                                <span class="text-[9px] font-black uppercase">Limp.</span>
+                                <i data-lucide="${cLim ? 'check-square' : 'square'}" class="w-3 h-3"></i>
+                            </button>
+                            <button onclick="toggleHito(${item.id}, 'chk_retiro'${subDirArgHito})" class="w-full flex items-center justify-between px-2 py-1.5 rounded-lg border transition-all ${cRet ? 'bg-red-50 border-red-400 text-red-600 shadow-inner' : 'bg-white border-slate-200 text-slate-400 hover:border-red-300'}" title="Confirmar Retiro">
+                                <span class="text-[9px] font-black uppercase">Ret.</span>
+                                <i data-lucide="${cRet ? 'check-square' : 'square'}" class="w-3 h-3"></i>
+                            </button>
+                        </div>
+                    `;
+                } else {
+                    statusColHTML = `
+                        <button onclick="toggleStatus(${item.id}${subDirArgStatus})" class="w-full flex flex-col items-center justify-center p-2 rounded-xl border-2 transition-all ${isComp ? 'bg-emerald-500 border-emerald-500 text-white shadow-inner' : 'bg-white border-slate-200 text-slate-300 hover:border-emerald-400 hover:text-emerald-500'}" title="Marcar completado/pendiente">
+                            <i data-lucide="${isComp ? 'check-circle-2' : 'circle'}" class="w-5 h-5 mb-1"></i>
+                            <span class="text-[8px] font-black uppercase">${isComp ? 'Listo' : 'Pendiente'}</span>
+                        </button>
+                    `;
+                }
+
+                let subIndicator = item._isSub ? `<span class="bg-amber-100 text-amber-700 px-2 py-0.5 rounded text-[8px] uppercase ml-2 border border-amber-200 shadow-sm align-middle whitespace-nowrap">Adicional</span>` : '';
+                let isSubVal = item._isSub ? 'true' : 'false';
+                let deleteTitle = item._isSub ? 'Eliminar Adicional' : 'Eliminar Principal';
+
+                tableHTML += `
+                    <tr class="hover:bg-slate-50 transition-colors group ${isComp ? 'opacity-60 bg-slate-50/50' : ''}">
+                        <td class="p-4 pl-6 align-middle text-center border-r border-slate-50">
+                            ${checkHTML}
+                        </td>
+                        <td class="p-4 pl-4 align-top">
+                            ${statusColHTML}
+                        </td>
+                        <td class="p-4 align-top">
+                            <div class="font-black text-slate-800 bg-slate-100 px-2 py-1 rounded inline-block whitespace-nowrap mb-2">${item.fecha ? new Date(item.fecha).toLocaleDateString('es-ES', {timeZone:'UTC'}) : 'N/A'}</div>
+                            <div class="flex items-center gap-1 text-[9px] font-bold uppercase text-${typeColor}-600 bg-${typeColor}-50 px-2 py-1 rounded-full w-fit whitespace-nowrap">
+                                <i data-lucide="${typeIcon}" class="w-3 h-3"></i> ${item.type === 'ENTREGAS DE OBRA' ? 'ENT. OBRA' : item.type === 'RETIROS DE OBRA' ? 'RET. OBRA' : item.type}
+                            </div>
+                        </td>
+                        <td class="p-4 align-top max-w-[250px] whitespace-normal break-words">
+                            <div class="max-w-xs break-words whitespace-normal font-black text-slate-900 text-sm leading-tight mb-1">
+                                ${item.cliente} ${subIndicator}
+                            </div>
+                            ${item.obra ? `<div class="text-[10px] font-bold text-amber-600 mb-1 bg-amber-50 px-1.5 py-0.5 rounded inline-block break-words max-w-full"><i data-lucide="hard-hat" class="w-3 h-3 inline"></i> OBRA: ${item.obra.toUpperCase()}</div>` : ''}
+                            <div class="text-[10px] text-slate-500 font-semibold flex items-center gap-1 break-words"><i data-lucide="user" class="w-3 h-3 shrink-0"></i> <span class="break-words min-w-0">${item.contacto || 'N/A'}</span></div>
+                        </td>
+                        <td class="p-4 align-top max-w-[250px] whitespace-normal break-words">
+                            <div class="max-w-xs break-words whitespace-normal text-xs text-slate-600 font-medium mb-1">
+                                ${item.direccion}
+                            </div>
+                            ${item.ubicacion ? `<a href="${item.ubicacion}" target="_blank" class="text-[10px] font-bold text-blue-500 hover:underline flex items-center gap-1 break-all"><i data-lucide="map-pin" class="w-3 h-3 shrink-0"></i> Ver Mapa</a>` : '<span class="text-[9px] text-slate-400 uppercase font-bold">Sin Link Maps</span>'}
+                        </td>
+                        <td class="p-4 align-top text-center">
+                            <div class="font-black text-lg text-slate-700 bg-slate-100 w-10 h-10 rounded-xl flex items-center justify-center mx-auto shadow-inner">${totalUnits}</div>
+                        </td>
+                        <td class="p-4 pr-6 align-top text-right">
+                            <div class="flex flex-col gap-2 opacity-100 lg:opacity-50 group-hover:opacity-100 transition-opacity justify-end">
+                                <button onclick="editEntry(${item.id})" class="btn-secondary py-2 px-3 flex items-center justify-center gap-2 text-[9px]" title="Editar Todo el Registro">
+                                    <i data-lucide="edit-2" class="w-3 h-3"></i> Editar Todo
+                                </button>
+                                <button onclick="deleteEntry(${item.id}, ${isSubVal}, '${subDirEnc}')" class="bg-red-50 text-red-500 border border-red-100 py-2 px-3 rounded-xl font-bold uppercase text-[9px] hover:bg-red-500 hover:text-white transition-all flex items-center justify-center gap-2" title="${deleteTitle}">
+                                    <i data-lucide="trash" class="w-3 h-3"></i> Eliminar
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            tableHTML += `</tbody></table>`;
+            cont.innerHTML = tableHTML;
+            lucide.createIcons({root: cont});
+
+            // Restablecer check "Seleccionar todo"
+            const rowChks = document.querySelectorAll('.row-chk');
+            let allChecked = rowChks.length > 0;
+            rowChks.forEach(c => { if(!c.checked) allChecked = false; });
+            const chkAll = document.getElementById('chk_all');
+            if(chkAll) chkAll.checked = allChecked;
+            
+            updateMoverButton();
+        }
+
+        function toggleStatus(id, subDir = '') {
+            const item = state.database.find(x => x.id === id);
+            if(item) {
+                if (subDir) {
+                    if (!item.extra_status) item.extra_status = {};
+                    item.extra_status[subDir] = item.extra_status[subDir] === 'COMPLETADO' ? 'PENDIENTE' : 'COMPLETADO';
+                    if (item.extra_status[subDir] !== 'COMPLETADO') {
+                        let subDirEnc = encodeURIComponent(subDir).replace(/'/g, "%27");
+                        state.selectedRows = state.selectedRows.filter(v => v !== `${id}|${subDirEnc}`);
+                    }
+                } else {
+                    item.status = item.status === 'COMPLETADO' ? 'PENDIENTE' : 'COMPLETADO';
+                    if (item.status !== 'COMPLETADO') {
+                        state.selectedRows = state.selectedRows.filter(v => v !== `${id}|`);
+                    }
+                }
+                saveState();
+                if (state.view === 'base_datos') filterDB();
+                if (state.view === 'reportes') updateDash();
+            }
+        }
+
+        function toggleHito(id, hito, subDir = '') {
+            const item = state.database.find(x => x.id === id);
+            if(item) {
+                if (subDir) {
+                    let extraHitoKey = 'extra_' + hito; 
+                    if (!item[extraHitoKey]) item[extraHitoKey] = {};
+                    
+                    if (item.extra_status && item.extra_status[subDir] === 'COMPLETADO' && item[extraHitoKey][subDir] === undefined) {
+                        if (!item.extra_chk_entrega) item.extra_chk_entrega = {};
+                        if (!item.extra_chk_limpieza) item.extra_chk_limpieza = {};
+                        if (!item.extra_chk_retiro) item.extra_chk_retiro = {};
+                        item.extra_chk_entrega[subDir] = true;
+                        item.extra_chk_limpieza[subDir] = true;
+                        item.extra_chk_retiro[subDir] = true;
+                    }
+                    
+                    if (item[extraHitoKey][subDir] === undefined) item[extraHitoKey][subDir] = false;
+                    item[extraHitoKey][subDir] = !item[extraHitoKey][subDir];
+                    
+                    if (!item.extra_status) item.extra_status = {};
+                    let isEnt = item.extra_chk_entrega && item.extra_chk_entrega[subDir];
+                    let isLim = item.extra_chk_limpieza && item.extra_chk_limpieza[subDir];
+                    let isRet = item.extra_chk_retiro && item.extra_chk_retiro[subDir];
+                    
+                    if (isEnt && isLim && isRet) {
+                        item.extra_status[subDir] = 'COMPLETADO';
+                        showToast("EVENTO ADICIONAL COMPLETADO");
+                    } else {
+                        item.extra_status[subDir] = 'PENDIENTE';
+                        let subDirEnc = encodeURIComponent(subDir).replace(/'/g, "%27");
+                        state.selectedRows = state.selectedRows.filter(v => v !== `${id}|${subDirEnc}`);
+                    }
+                } else {
+                    if (item.status === 'COMPLETADO' && item.chk_entrega === undefined) {
+                        item.chk_entrega = true; item.chk_limpieza = true; item.chk_retiro = true;
+                    }
+                    if (item[hito] === undefined) item[hito] = false;
+                    item[hito] = !item[hito];
+                    
+                    if (item.chk_entrega && item.chk_limpieza && item.chk_retiro) {
+                        item.status = 'COMPLETADO';
+                        showToast("EVENTO COMPLETADO");
+                    } else {
+                        item.status = 'PENDIENTE';
+                        state.selectedRows = state.selectedRows.filter(v => v !== `${id}|`);
+                    }
+                }
+                saveState();
+                if (state.view === 'base_datos') filterDB();
+                if (state.view === 'reportes') updateDash();
+            }
+        }
+
+        function editEntry(id) { state.editingId = id; state.view = 'programar'; render(); }
+        
+        function deleteEntry(id, isSub = false, subDirEnc = '') {
+            const msg = isSub 
+                ? "¿Estás seguro de eliminar PERMANENTEMENTE esta ubicación adicional?" 
+                : "¿Estás seguro de eliminar PERMANENTEMENTE el registro principal? (Los adicionales se mantendrán intactos si existen).";
+                
+            showConfirm(msg + " Esta acción no se puede deshacer.", function() {
+                const itemIndex = state.database.findIndex(x => x.id === id);
+                if (itemIndex === -1) return;
+                
+                let item = state.database[itemIndex];
+                
+                if (isSub) {
+                    const subDir = decodeURIComponent(subDirEnc);
+                    item.productos = item.productos.filter(p => p.n_dir !== subDir);
+                    if (item.extra_status) delete item.extra_status[subDir];
+                    if (item.extra_chk_entrega) delete item.extra_chk_entrega[subDir];
+                    if (item.extra_chk_limpieza) delete item.extra_chk_limpieza[subDir];
+                    if (item.extra_chk_retiro) delete item.extra_chk_retiro[subDir];
+                } else {
+                    item.productos = item.productos.filter(p => !!p.n_dir);
+                }
+                
+                if (!item.productos || item.productos.length === 0) {
+                    state.database.splice(itemIndex, 1);
+                }
+                
+                saveState();
+                filterDB();
+                showToast("Registro Eliminado");
+            });
+        }
+
+        // ---------- LOGÍSTICA DIARIA Y PDF ----------
+        
+        function getFilteredItemLogistics(item, statusFilter) {
+            if (statusFilter === 'TODOS') return item;
+
+            const isMainComp = item.status === 'COMPLETADO' || item.status === 'LISTO';
+
+            if (!item.productos || item.productos.length === 0) {
+                if (statusFilter === 'PENDIENTES' && isMainComp) return null;
+                if (statusFilter === 'COMPLETADOS' && !isMainComp) return null;
+                return item;
+            }
+
+            let mainProds = [];
+            let extraProds = [];
+            
+            item.productos.forEach(p => {
+                if (p.n_dir) {
+                    let dirStat = (item.extra_status && item.extra_status[p.n_dir]) || 'PENDIENTE';
+                    let isDirComp = dirStat === 'COMPLETADO' || dirStat === 'LISTO';
+                    
+                    if (statusFilter === 'PENDIENTES' && !isDirComp) extraProds.push(p);
+                    if (statusFilter === 'COMPLETADOS' && isDirComp) extraProds.push(p);
+                } else {
+                    if (statusFilter === 'PENDIENTES' && !isMainComp) mainProds.push(p);
+                    if (statusFilter === 'COMPLETADOS' && isMainComp) mainProds.push(p);
+                }
+            });
+
+            if (mainProds.length === 0 && extraProds.length === 0) return null;
+
+            return { ...item, productos: [...mainProds, ...extraProds] };
+        }
+
+        function renderProgramacionFecha(content) {
+            const today = new Date().toISOString().split('T')[0];
+            content.innerHTML = `
+                <div class="flex flex-col md:flex-row justify-between items-end mb-8 px-2 gap-4">
+                    <div>
+                        <h2 class="text-3xl font-black uppercase tracking-tighter text-slate-900 flex items-center gap-3"><i data-lucide="map" class="w-8 h-8 text-emerald-500"></i> Logística Diaria</h2>
+                        <p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Hoja de ruta para el personal de campo</p>
+                    </div>
+                </div>
+                <div class="bg-white rounded-[2rem] border border-slate-200 shadow-xl p-6 md:p-8">
+                    <div class="flex flex-col md:flex-row gap-6 items-center justify-between border-b-2 border-slate-100 pb-8 mb-8">
+                        <div class="flex items-center gap-4 bg-slate-50 p-2 rounded-2xl border border-slate-200 shadow-inner w-full md:w-auto">
+                            <label class="font-black text-[10px] uppercase tracking-widest text-slate-500 pl-4 whitespace-nowrap">Fecha de Ruta:</label>
+                            <input type="date" id="route_date" class="input-trono bg-white w-full md:w-48 shadow-sm" value="${today}" onchange="generateRoute()">
+                        </div>
+                        <div class="flex bg-slate-200 p-1 rounded-xl w-full lg:w-auto">
+                            <button onclick="setRouteStatus('PENDIENTES', this)" class="flex-1 lg:flex-none px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all route-tab bg-white shadow text-emerald-600">Pendientes</button>
+                            <button onclick="setRouteStatus('COMPLETADOS', this)" class="flex-1 lg:flex-none px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all route-tab text-slate-500 hover:text-slate-700">Listos</button>
+                            <button onclick="setRouteStatus('TODOS', this)" class="flex-1 lg:flex-none px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all route-tab text-slate-500 hover:text-slate-700">Todos</button>
+                        </div>
+                        <button onclick="exportRoutePDF()" class="w-full md:w-auto bg-emerald-600 text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-200 flex justify-center items-center gap-2">
+                            <i data-lucide="file-down" class="w-5 h-5"></i> Descargar PDF de Ruta
+                        </button>
+                    </div>
+                    <div id="route_content" class="space-y-4"></div>
+                </div>
+            `;
+            lucide.createIcons();
+            if(!state.routeStatus) state.routeStatus = 'PENDIENTES';
+            generateRoute();
+        }
+
+        function setRouteStatus(status, btn) {
+            state.routeStatus = status;
+            document.querySelectorAll('.route-tab').forEach(b => {
+                b.classList.remove('bg-white', 'shadow', 'text-emerald-600');
+                b.classList.add('text-slate-500');
+            });
+            btn.classList.add('bg-white', 'shadow', 'text-emerald-600');
+            btn.classList.remove('text-slate-500');
+            generateRoute();
+        }
+
+        function generateRoute() {
+            const targetDate = document.getElementById('route_date').value;
+            if(!targetDate) return;
+            const statusFilter = state.routeStatus || 'PENDIENTES';
+            const cont = document.getElementById('route_content');
+            
+            const groups = { 'EVENTOS': [], 'ENTREGAS': [], 'RETIROS': [], 'MOVIMIENTOS': [] };
+            let expandedDB = getExpandedDatabase();
+
+            expandedDB.forEach(item => {
+                if (item.type === 'EVENTO') {
+                    let isEntComp = item.chk_entrega || false;
+                    let showEnt = (statusFilter === 'TODOS') || (statusFilter === 'PENDIENTES' && !isEntComp) || (statusFilter === 'COMPLETADOS' && isEntComp);
+
+                    if (item.fecha === targetDate && showEnt) {
+                        groups['EVENTOS'].push({ ...item, _routeType: 'ENTREGA DE EVENTO', _actionCompleted: isEntComp });
+                    }
+
+                    let isRetComp = item.chk_retiro || false;
+                    let showRet = (statusFilter === 'TODOS') || (statusFilter === 'PENDIENTES' && !isRetComp) || (statusFilter === 'COMPLETADOS' && isRetComp);
+                    
+                    if (item.f_r === targetDate && showRet) {
+                        groups['RETIROS'].push({ ...item, _routeType: 'RETIRO DE EVENTO', _routeTime: item.h_r, _routeTimeMax: item.h_r_m, _actionCompleted: isRetComp });
+                    }
+
+                    let isLimComp = item.chk_limpieza || false;
+                    let showLim = (statusFilter === 'TODOS') || (statusFilter === 'PENDIENTES' && !isLimComp) || (statusFilter === 'COMPLETADOS' && isLimComp);
+
+                    if (item._ref.limpiezas && showLim) {
+                        item._ref.limpiezas.forEach(l => {
+                            if(l.fecha === targetDate) {
+                                groups['MOVIMIENTOS'].push({ ...item, _routeType: 'LIMPIEZA DE EVENTO', _routeTime: l.hora, _actionCompleted: isLimComp });
+                            }
+                        });
+                    }
+                } else {
+                    let isComp = item.status === 'COMPLETADO' || item.status === 'LISTO';
+                    if (statusFilter === 'PENDIENTES' && isComp) return;
+                    if (statusFilter === 'COMPLETADOS' && !isComp) return;
+
+                    if(item.fecha === targetDate) {
+                        if(item.type === 'ENTREGAS DE OBRA') groups['ENTREGAS'].push({ ...item, _routeType: 'ENTREGA DE OBRA' });
+                        else if(item.type === 'RETIROS DE OBRA') groups['RETIROS'].push({ ...item, _routeType: 'RETIRO DE OBRA' });
+                        else if(item.type === 'MOVIMIENTO') groups['MOVIMIENTOS'].push({ ...item, _routeType: 'MOVIMIENTO' });
+                    }
+                }
+            });
+
+            groups['EVENTOS'].sort((a, b) => (a.h_e || '23:59').localeCompare(b.h_e || '23:59'));
+            groups['ENTREGAS'].sort((a, b) => (a.obra || 'ZZZ').localeCompare(b.obra || 'ZZZ'));
+
+            let totalActs = groups['EVENTOS'].length + groups['ENTREGAS'].length + groups['RETIROS'].length + groups['MOVIMIENTOS'].length;
+
+            if(totalActs === 0) {
+                cont.innerHTML = `
+                    <div class="text-center py-20 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200">
+                        <i data-lucide="check-circle" class="w-16 h-16 text-slate-300 mx-auto mb-4"></i>
+                        <h3 class="font-black text-slate-400 uppercase tracking-widest">Día Libre</h3>
+                        <p class="text-xs text-slate-400 mt-2 font-bold">No hay servicios programados para los filtros seleccionados.</p>
+                    </div>`;
+                lucide.createIcons({root: cont});
+                return;
+            }
+
+            let html = `
+                <div class="hidden md:grid grid-cols-12 gap-4 bg-slate-100 p-4 rounded-xl text-[10px] font-black uppercase text-slate-500 mb-4 shadow-sm border border-slate-200">
+                    <div class="col-span-2">FECHA / PAGO / VEND.</div>
+                    <div class="col-span-3">CLIENTE / CONTACTOS</div>
+                    <div class="col-span-5">DIRECCIONES Y PRODUCTOS</div>
+                    <div class="col-span-2 text-center">DETALLE / HORARIO</div>
+                </div>
+            `;
+            
+            const renderBlocks = [
+                { title: 'EVENTOS (ENTREGAS)', data: groups['EVENTOS'], icon: 'star', color: 'blue' },
+                { title: 'ENTREGAS DE OBRA', data: groups['ENTREGAS'], icon: 'truck', color: 'emerald' },
+                { title: 'RETIROS (OBRAS Y EVENTOS)', data: groups['RETIROS'], icon: 'package-minus', color: 'red' },
+                { title: 'MOVIMIENTOS Y LIMPIEZAS', data: groups['MOVIMIENTOS'], icon: 'refresh-cw', color: 'indigo' }
+            ];
+
+            renderBlocks.forEach(block => {
+                if(block.data.length === 0) return;
+
+                html += `
+                    <div class="mb-10">
+                        <h3 class="font-black text-sm uppercase tracking-widest text-${block.color}-700 bg-${block.color}-50 p-4 rounded-xl border border-${block.color}-100 flex items-center gap-3 mb-6 shadow-sm">
+                            <div class="bg-white p-1.5 rounded-lg shadow-sm"><i data-lucide="${block.icon}" class="w-5 h-5"></i></div>
+                            ${block.title} <span class="ml-auto bg-white px-3 py-1 rounded-full text-[10px] border border-${block.color}-200">${block.data.length} SERVICIOS</span>
+                        </h3>
+                        <div class="flex flex-col">
+                `;
+
+                block.data.forEach(item => {
+                    let isActComp = item._actionCompleted !== undefined ? item._actionCompleted : (item.status === 'COMPLETADO' || item.status === 'LISTO');
+                    
+                    let mainContact = item.contacto;
+                    if (item.type === 'ENTREGAS DE OBRA' && isActComp && item.cont_contrata) {
+                        mainContact = item.cont_contrata;
+                    }
+
+                    const statusIcon = isActComp ? '<i data-lucide="check-circle-2" class="w-4 h-4 text-emerald-500 inline-block mr-1"></i>' : '';
+                    let vendorLabel = item.type === 'RETIROS DE OBRA' ? 'REGISTRÓ: ' : 'VEND: ';
+                    let col1 = `
+                        <div class="font-black text-slate-800 text-sm mb-1">${statusIcon}${new Date(item.fecha).toLocaleDateString('es-ES', {timeZone:'UTC'})}</div>
+                        <div class="text-[10px] font-bold text-slate-500 uppercase"><i data-lucide="dollar-sign" class="w-3 h-3 inline"></i> ${item.pago}</div>
+                        ${item.vendedor && item.vendedor !== 'N/A' ? `<div class="text-[10px] font-bold text-slate-500 uppercase mt-1"><i data-lucide="user-check" class="w-3 h-3 inline"></i> ${vendorLabel}${item.vendedor}</div>` : ''}
+                        ${item.cot ? `<div class="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded mt-2 inline-block shadow-sm">COT: ${item.cot}</div>` : ''}
+                        <div class="text-[9px] font-black text-white bg-slate-800 px-2 py-1 rounded mt-2 inline-block">${item._routeType}</div>
+                    `;
+
+                    let contactosAdicionales = '';
+                    if(item.productos) {
+                        const contactosSet = new Set();
+                        item.productos.forEach(p => { if(p.n_cont && p.n_cont.toUpperCase() !== mainContact.toUpperCase()) contactosSet.add(p.n_cont.toUpperCase()); });
+                        contactosSet.forEach(c => { contactosAdicionales += `<div class="text-[10px] font-medium text-slate-500 flex items-start gap-1 mt-1"><i data-lucide="phone" class="w-3 h-3 mt-0.5 text-slate-400 shrink-0"></i> <span class="break-words min-w-0">${c} (Sitio)</span></div>`; });
+                    }
+                    
+                    let btnNotaSalida = '';
+                    if (item._routeType === 'ENTREGA DE OBRA' && state.routeStatus === 'PENDIENTES') {
+                        let subDirArg = item._isSub ? `'${encodeURIComponent(item._subDir).replace(/'/g, "%27")}'` : 'null';
+                        btnNotaSalida = `
+                            <button onclick="generateNotaSalidaPDF(${item.id}, ${subDirArg})" class="mt-4 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black uppercase px-3 py-2 rounded-xl shadow-sm flex items-center justify-center gap-1 w-full md:w-auto transition-colors">
+                                <i data-lucide="file-text" class="w-3 h-3"></i> Nota de Salida
+                            </button>
+                        `;
+                    }
+
+                    let col2 = `
+                        <div class="font-black text-slate-900 text-sm uppercase mb-2 leading-tight break-words">${item.cliente}</div>
+                        <div class="text-[11px] font-bold text-slate-700 flex items-start gap-1"><i data-lucide="phone" class="w-3 h-3 mt-0.5 text-slate-400 shrink-0"></i> <span class="break-words min-w-0">${mainContact}</span></div>
+                        ${contactosAdicionales}
+                        ${btnNotaSalida}
+                    `;
+
+                    let mainProds = item.productos || [];
+
+                    let col3 = '';
+                    let isMov = item.type === 'MOVIMIENTO';
+
+                    col3 += `
+                        <div class="bg-slate-50 border border-slate-200 p-3 rounded-xl mb-2">
+                            ${isMov ? `<div class="text-[8px] font-black uppercase text-slate-500 mb-1 tracking-widest"><i data-lucide="arrow-up-circle" class="w-3 h-3 inline"></i> UBICACIÓN DE ORIGEN</div>` : ''}
+                            <div class="text-xs text-slate-800 font-bold uppercase flex items-start gap-1 mb-2">
+                                <i data-lucide="map-pin" class="w-3 h-3 mt-0.5 text-red-500 shrink-0"></i> 
+                                <span class="break-words flex-1 min-w-0">${item.direccion}</span>
+                            </div>
+                            ${item.ubicacion ? `<a href="${item.ubicacion}" target="_blank" class="text-[9px] font-black uppercase text-blue-600 bg-blue-50 px-2 py-1 rounded inline-block w-full break-all mb-2 hover:bg-blue-100 transition-colors input-lowercase" style="text-transform: none;"><i data-lucide="link" class="w-3 h-3 inline"></i> ${item.ubicacion}</a>` : ''}
+                            <div class="flex flex-wrap gap-2">
+                                ${mainProds.map(p => {
+                                    let symHtml = '';
+                                    if(p.sym) symHtml = item.type === 'EVENTO' ? ' <i data-lucide="zap" class="w-3 h-3 text-amber-500 inline-block mb-0.5"></i>(LÁMPARA)' : ' <i data-lucide="lock" class="w-3 h-3 text-slate-500 inline-block mb-0.5"></i>(CANDADO)';
+                                    return `<span class="bg-white border border-slate-200 shadow-sm text-[10px] font-black uppercase px-2 py-1 rounded-lg text-slate-700 items-center">${p.cant}x ${p.modelo}${symHtml}</span>`;
+                                }).join('')}
+                            </div>
+                        </div>
+                    `;
+
+                    let col4 = '';
+                    if(item._routeType === 'ENTREGA DE EVENTO') {
+                        let fRetiroDate = item.f_r ? new Date(item.f_r).toLocaleDateString('es-ES', {timeZone:'UTC'}) : 'S/F';
+                        col4 = `
+                            <div class="text-[9px] font-black uppercase text-slate-400 mb-1">Horario Entrega</div>
+                            <div class="bg-blue-100 text-blue-800 font-black text-sm px-3 py-2 rounded-xl text-center shadow-inner w-full mb-2">${item.h_e || 'N/A'} - ${item.h_e_m || 'N/A'}</div>
+                            <div class="text-[9px] font-black uppercase text-slate-400 mb-1 mt-1 border-t border-slate-200 pt-2 w-full text-center">Retiro Prog.</div>
+                            <div class="bg-red-50 text-red-600 font-bold text-[10px] px-2 py-1.5 rounded-lg text-center shadow-inner w-full border border-red-100">${fRetiroDate}<br>${item.h_r || 'N/A'} - ${item.h_r_m || 'N/A'}</div>
+                        `;
+                    } else if(item._routeType === 'RETIRO DE EVENTO') {
+                        col4 = `
+                            <div class="text-[9px] font-black uppercase text-slate-400 mb-1">Rango de Retiro</div>
+                            <div class="bg-red-100 text-red-800 font-black text-sm px-3 py-2 rounded-xl text-center shadow-inner">${item._routeTime || 'N/A'} - ${item._routeTimeMax || 'N/A'}</div>
+                        `;
+                    } else if(item._routeType === 'LIMPIEZA DE EVENTO') {
+                        col4 = `
+                            <div class="text-[9px] font-black uppercase text-slate-400 mb-1">Horario Limpieza</div>
+                            <div class="bg-cyan-100 text-cyan-800 font-black text-sm px-3 py-2 rounded-xl text-center shadow-inner"><i data-lucide="droplets" class="w-4 h-4 inline"></i> ${item._routeTime || 'N/A'}</div>
+                        `;
+                    } else if(item.type === 'ENTREGAS DE OBRA' || item.type === 'MOVIMIENTO') {
+                        col4 = `
+                            <div class="text-[9px] font-black uppercase text-slate-400 mb-1">Obra / Operador</div>
+                            <div class="bg-amber-100 text-amber-800 font-black text-xs uppercase px-3 py-2 rounded-xl text-center shadow-inner border border-amber-200 w-full"><i data-lucide="hard-hat" class="w-4 h-4 inline mb-0.5"></i><br>${(item.obra || 'S/N').toUpperCase()}</div>
+                        `;
+                    } else if(item.type === 'RETIROS DE OBRA') {
+                        let motivoDesc = item.motivo === 'TO' ? 'Término de Obra' : item.motivo === 'SUSP' ? 'Suspendido' : item.motivo === 'MP' ? 'Mal Pago' : item.motivo;
+                        col4 = `
+                            <div class="text-[9px] font-black uppercase text-slate-400 mb-1">Motivo de Retiro</div>
+                            <div class="bg-rose-100 text-rose-800 font-black text-xs uppercase px-3 py-2 rounded-xl text-center shadow-inner border border-rose-200 w-full">${motivoDesc || 'N/A'}</div>
+                            ${item.obra ? `<div class="text-[9px] font-bold uppercase text-slate-500 mt-2 text-center w-full">OBRA: ${item.obra.toUpperCase()}</div>` : ''}
+                        `;
+                    }
+
+                    html += `
+                        <div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-stretch section-separator pb-6 mb-6">
+                            <div class="md:col-span-2 bg-white/50 p-2 rounded-xl"><div class="md:hidden text-[9px] font-black uppercase text-slate-400 mb-1">FECHA / DATOS</div>${col1}</div>
+                            <div class="md:col-span-3 bg-white/50 p-2 rounded-xl border-l border-slate-100 overflow-hidden min-w-0"><div class="md:hidden text-[9px] font-black uppercase text-slate-400 mb-1">CLIENTE / CONTACTOS</div>${col2}</div>
+                            <div class="md:col-span-5 bg-white/50 p-2 rounded-xl border-l border-slate-100 overflow-hidden min-w-0"><div class="md:hidden text-[9px] font-black uppercase text-slate-400 mb-1">DIRECCIONES Y PRODUCTOS</div>${col3}</div>
+                            <div class="md:col-span-2 bg-slate-50/50 p-3 rounded-xl border-2 border-slate-100 flex flex-col justify-center items-center">${col4}</div>
+                        </div>
+                    `;
+                });
+                html += `</div></div>`; 
+            });
+            
+            cont.innerHTML = html;
+            lucide.createIcons({root: cont});
+        }
+
+        // ---------- EXPORTACIÓN A PDF DE HOJA DE RUTA ----------
+        function exportRoutePDF() {
+            const targetDate = document.getElementById('route_date').value;
+            if(!targetDate) return showToast("Seleccione una fecha");
+            const statusFilter = state.routeStatus || 'PENDIENTES';
+
+            let activities = [];
+            let expandedDB = getExpandedDatabase();
+
+            expandedDB.forEach(item => {
+                if (item.type === 'EVENTO') {
+                    let isEntComp = item.chk_entrega || false;
+                    let showEnt = (statusFilter === 'TODOS') || (statusFilter === 'PENDIENTES' && !isEntComp) || (statusFilter === 'COMPLETADOS' && isEntComp);
+
+                    if (item.fecha === targetDate && showEnt) {
+                        activities.push({ ...item, _routeType: 'ENTREGA DE EVENTO', _actionCompleted: isEntComp });
+                    }
+
+                    let isRetComp = item.chk_retiro || false;
+                    let showRet = (statusFilter === 'TODOS') || (statusFilter === 'PENDIENTES' && !isRetComp) || (statusFilter === 'COMPLETADOS' && isRetComp);
+                    
+                    if (item.f_r === targetDate && showRet) {
+                        activities.push({ ...item, _routeType: 'RETIRO DE EVENTO', _routeTime: item.h_r, _routeTimeMax: item.h_r_m, _actionCompleted: isRetComp });
+                    }
+
+                    let isLimComp = item.chk_limpieza || false;
+                    let showLim = (statusFilter === 'TODOS') || (statusFilter === 'PENDIENTES' && !isLimComp) || (statusFilter === 'COMPLETADOS' && isLimComp);
+
+                    if (item._ref.limpiezas && showLim) {
+                        item._ref.limpiezas.forEach(l => {
+                            if(l.fecha === targetDate) { activities.push({ ...item, _routeType: 'LIMPIEZA DE EVENTO', _routeTime: l.hora, _actionCompleted: isLimComp }); }
+                        });
+                    }
+                } else {
+                    let isComp = item.status === 'COMPLETADO' || item.status === 'LISTO';
+                    if (statusFilter === 'PENDIENTES' && isComp) return;
+                    if (statusFilter === 'COMPLETADOS' && !isComp) return;
+
+                    if(item.fecha === targetDate) {
+                        if(item.type === 'ENTREGAS DE OBRA') activities.push({ ...item, _routeType: 'ENTREGA DE OBRA' });
+                        else if(item.type === 'RETIROS DE OBRA') activities.push({ ...item, _routeType: 'RETIRO DE OBRA' });
+                        else if(item.type === 'MOVIMIENTO') activities.push({ ...item, _routeType: 'MOVIMIENTO' });
+                    }
+                }
+            });
+
+            activities.sort((a, b) => {
+                const order = { 'ENTREGA DE EVENTO':1, 'ENTREGA DE OBRA':2, 'RETIRO DE OBRA':3, 'RETIRO DE EVENTO':3, 'MOVIMIENTO':4, 'LIMPIEZA DE EVENTO':4 };
+                let diff = (order[a._routeType]||5) - (order[b._routeType]||5);
+                if(diff !== 0) return diff;
+                
+                if(a._routeType === 'ENTREGA DE EVENTO') return (a.h_e || '23:59').localeCompare(b.h_e || '23:59');
+                if(a._routeType === 'ENTREGA DE OBRA') return (a.obra || 'ZZZ').localeCompare(b.obra || 'ZZZ');
+                return 0;
+            });
+
+            if(activities.length === 0) return showToast("No hay datos para PDF");
+
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF('p', 'pt', 'letter');
+            
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(18);
+            doc.text("TRONOS - HOJA DE RUTA DIARIA", 40, 40);
+            doc.setFontSize(10);
+            doc.setTextColor(100);
+            const dateStr = new Date(targetDate).toLocaleDateString('es-ES', {timeZone:'UTC', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'}).toUpperCase();
+            doc.text(`FECHA: ${dateStr} - FILTRO: ${statusFilter.toUpperCase()}`, 40, 55);
+            doc.setTextColor(0);
+
+            const tableData = activities.map(item => {
+                let fDate = item.fecha;
+                if (fDate && fDate.includes('-')) {
+                    const parts = fDate.split('-');
+                    if(parts.length === 3) fDate = `${parts[2]}/${parts[1]}/${parts[0]}`;
+                }
+
+                let vendorLabel = item.type === 'RETIROS DE OBRA' ? 'Reg:' : 'Vend:';
+                let col1 = `${fDate}\nPago: ${item.pago}\n${item.vendedor && item.vendedor !== 'N/A' ? vendorLabel + ' ' + item.vendedor : ''}`;
+                if(item.cot) col1 += `\nCot: ${item.cot}`;
+                col1 += `\n[${item._routeType}]`;
+                
+                let isActComp = item._actionCompleted !== undefined ? item._actionCompleted : (item.status === 'COMPLETADO' || item.status === 'LISTO');
+                let mainContact = item.contacto;
+                if (item.type === 'ENTREGAS DE OBRA' && isActComp && item.cont_contrata) {
+                    mainContact = item.cont_contrata;
+                }
+
+                let contactos = mainContact;
+                if(item.productos) {
+                    const cSet = new Set();
+                    item.productos.forEach(p => { if(p.n_cont && p.n_cont.toUpperCase() !== mainContact.toUpperCase()) cSet.add(p.n_cont.toUpperCase()); });
+                    cSet.forEach(c => { contactos += `\nSitio: ${c}`; });
+                }
+                let col2 = `${item.cliente}\nTel: ${contactos}`;
+
+                let col3 = '';
+                let isMov = item.type === 'MOVIMIENTO';
+                
+                if(isMov) col3 += `[ORIGEN]\n`;
+                col3 += `DIRECCIÓN: ${item.direccion}\n`;
+                if(item.ubicacion) col3 += `${item.ubicacion}\n`;
+                
+                if(item.productos && item.productos.length > 0) {
+                    col3 += `> ${item.productos.map(p=>{
+                        let symText = '';
+                        if(p.sym) symText = item.type === 'EVENTO' ? ' (+Lámpara)' : ' (+Candado)';
+                        return `${p.cant}x ${p.modelo}${symText}`;
+                    }).join(', ')}\n`;
+                }
+
+                let col4 = '';
+                if(item._routeType === 'ENTREGA DE EVENTO') {
+                    let fRetiro = item.f_r;
+                    if (fRetiro && fRetiro.includes('-')) {
+                        const parts = fRetiro.split('-');
+                        if(parts.length === 3) fRetiro = `${parts[2]}/${parts[1]}/${parts[0]}`;
+                    }
+                    col4 = `ENTREGA:\n${item.h_e || 'N/A'} - ${item.h_e_m || 'N/A'}\n\nRETIRO: ${fRetiro || 'S/F'}\n${item.h_r || 'N/A'} - ${item.h_r_m || 'N/A'}`;
+                }
+                else if(item._routeType === 'RETIRO DE EVENTO') col4 = `RETIRO:\n${item._routeTime || 'N/A'} - ${item._routeTimeMax || 'N/A'}`;
+                else if(item._routeType === 'LIMPIEZA DE EVENTO') col4 = `LIMPIEZA:\n${item._routeTime || 'N/A'}`;
+                else if(item.type === 'ENTREGAS DE OBRA' || item.type === 'MOVIMIENTO') {
+                    col4 = `OBRA:\n${(item.obra || 'S/N').toUpperCase()}`;
+                }
+                else if(item.type === 'RETIROS DE OBRA') {
+                    col4 = `MOTIVO:\n${item.motivo}\nObra: ${(item.obra||'S/N').toUpperCase()}`;
+                }
+
+                return [col1.trim(), col2.trim(), col3.trim(), col4];
+            });
+
+            doc.autoTable({
+                startY: 70,
+                margin: { left: 20, right: 20 },
+                head: [['FECHA / DATOS', 'CLIENTE / CONTACTO', 'DIRECCIONES Y PRODUCTOS', 'DETALLE / HORARIO']],
+                body: tableData,
+                styles: { 
+                    fontSize: 8.5, 
+                    font: 'helvetica', 
+                    cellPadding: 3, 
+                    overflow: 'linebreak',
+                    lineColor: [0, 0, 0], 
+                    lineWidth: 1
+                },
+                headStyles: { 
+                    fillColor: [255, 255, 255], 
+                    textColor: [0, 0, 0], 
+                    fontStyle: 'normal', 
+                    halign: 'center' 
+                },
+                bodyStyles: { 
+                    fillColor: [255, 255, 255], 
+                    textColor: [0, 0, 0],
+                    valign: 'middle' 
+                },
+                alternateRowStyles: { 
+                    fillColor: [255, 255, 255] 
+                },
+                columnStyles: { 
+                    0: { cellWidth: 90, halign: 'left' },
+                    1: { cellWidth: 120, halign: 'left' },
+                    2: { cellWidth: 'auto', halign: 'left' }, 
+                    3: { cellWidth: 100, halign: 'left' }
+                },
+                theme: 'grid',
+                willDrawCell: function(data) {
+                    if (data.row.section === 'body' && (data.column.index === 1 || data.column.index === 2)) {
+                        if (!data.cell.customLines) {
+                            data.cell.customLines = [...data.cell.text];
+                            data.cell.text = data.cell.customLines.map(() => '');
+                        }
+                    }
+                },
+                didDrawCell: function(data) {
+                    if (data.row.section === 'body' && data.cell.customLines) {
+                        let fontSize = data.cell.styles.fontSize || 8.5;
+                        doc.setFontSize(fontSize);
+                        doc.setFont(data.cell.styles.font || 'helvetica', data.cell.styles.fontStyle || 'normal');
+                        let lineSpacing = fontSize * (doc.internal.getLineHeightFactor ? doc.internal.getLineHeightFactor() : 1.15); 
+                        
+                        let totalTextHeight = data.cell.customLines.length * lineSpacing;
+                        let startY = data.cell.y + (data.cell.height - totalTextHeight) / 2; 
+
+                        if (data.column.index === 1) {
+                            data.cell.customLines.forEach((line, i) => {
+                                let textY = startY + (i * lineSpacing) + (fontSize * 0.85); 
+                                let rectY = startY + (i * lineSpacing); 
+                                
+                                let isPhoneLine = line.trim().startsWith('Tel:') || line.trim().startsWith('Sitio:');
+                                let currentLink = "";
+                                
+                                if (isPhoneLine) {
+                                    let digits = line.replace(/\D/g, ''); 
+                                    if (digits.length >= 7) {
+                                        if (digits.length === 10 && !digits.startsWith("52")) digits = "52" + digits;
+                                        currentLink = `https://wa.me/${digits}`;
+                                    }
+                                }
+
+                                if (currentLink) {
+                                    doc.setTextColor(37, 99, 235);
+                                } else {
+                                    doc.setTextColor(0, 0, 0);
+                                }
+
+                                let printText = line.trimRight();
+                                if(printText.length > 0) {
+                                    doc.text(printText, data.cell.x + data.cell.padding('left'), textY);
+                                    
+                                    if (currentLink) {
+                                        let textWidth = doc.getTextWidth(printText);
+                                        doc.setDrawColor(37, 99, 235);
+                                        doc.setLineWidth(0.5);
+                                        doc.line(data.cell.x + data.cell.padding('left'), textY + 1.5, data.cell.x + data.cell.padding('left') + textWidth, textY + 1.5);
+                                        doc.link(data.cell.x + data.cell.padding('left'), rectY, textWidth, lineSpacing, { url: currentLink });
+                                    }
+                                }
+                            });
+                            doc.setTextColor(0, 0, 0); 
+                        } 
+                        else if (data.column.index === 2) {
+                            let queries = [];
+                            let activeUrl = "";
+                            
+                            data.cell.customLines.forEach(line => {
+                                let trimmed = line.trim();
+                                if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+                                    activeUrl = trimmed;
+                                    queries.push(activeUrl);
+                                } else if (trimmed.startsWith('>') || trimmed.startsWith('[') || trimmed.startsWith('DIRECCIÓN:')) {
+                                    activeUrl = "";
+                                    queries.push("");
+                                } else if (activeUrl) {
+                                    activeUrl += trimmed;
+                                    for(let j = queries.length - 1; j >= 0; j--) {
+                                        if(queries[j] === "") break;
+                                        queries[j] = activeUrl;
+                                    }
+                                    queries.push(activeUrl);
+                                } else {
+                                    queries.push("");
+                                }
+                            });
+
+                            let isProductBlock = false;
+
+                            data.cell.customLines.forEach((line, i) => {
+                                let textY = startY + (i * lineSpacing) + (fontSize * 0.85); 
+                                let rectY = startY + (i * lineSpacing); 
+                                let fullUrl = queries[i];
+                                let isCurrentLink = fullUrl !== "";
+
+                                let printText = line.trimRight();
+                                let trimmedPrint = printText.trim();
+
+                                if (trimmedPrint.startsWith('>')) {
+                                    isProductBlock = true;
+                                } else if (trimmedPrint === '' || trimmedPrint.startsWith('DIRECCIÓN:') || trimmedPrint.startsWith('[') || trimmedPrint.startsWith('OBRA:') || trimmedPrint.startsWith('http')) {
+                                    isProductBlock = false;
+                                }
+
+                                if (isProductBlock) {
+                                    doc.setFont("helvetica", "bold");
+                                } else {
+                                    doc.setFont(data.cell.styles.font || 'helvetica', data.cell.styles.fontStyle || 'normal');
+                                }
+
+                                if (isCurrentLink) {
+                                    doc.setTextColor(37, 99, 235);
+                                } else {
+                                    doc.setTextColor(0, 0, 0);
+                                }
+
+                                if(printText.length > 0) {
+                                    doc.text(printText, data.cell.x + data.cell.padding('left'), textY);
+                                    
+                                    if (isCurrentLink) {
+                                        let textWidth = doc.getTextWidth(printText);
+                                        doc.setDrawColor(37, 99, 235);
+                                        doc.setLineWidth(0.5);
+                                        doc.line(data.cell.x + data.cell.padding('left'), textY + 1.5, data.cell.x + data.cell.padding('left') + textWidth, textY + 1.5);
+                                        doc.link(data.cell.x + data.cell.padding('left'), rectY, textWidth, lineSpacing, { url: fullUrl });
+                                    }
+                                }
+                            });
+                            doc.setTextColor(0, 0, 0); 
+                        }
+                    }
+                }
+            });
+
+            // --- SUMATORIAS DINAMICAS AL FINAL DEL PDF ---
+            let entregasStats = {};
+            let retirosStats = {};
+
+            activities.forEach(item => {
+                if (item.type === 'ENTREGAS DE OBRA') {
+                    (item.productos || []).forEach(p => {
+                        let m = p.modelo.toUpperCase();
+                        entregasStats[m] = (entregasStats[m] || 0) + (parseInt(p.cant) || 0);
+                    });
+                }
+                if (item.type === 'RETIROS DE OBRA') {
+                    (item.productos || []).forEach(p => {
+                        let m = p.modelo.toUpperCase();
+                        retirosStats[m] = (retirosStats[m] || 0) + (parseInt(p.cant) || 0);
+                    });
+                }
+            });
+
+            let entStr = Object.keys(entregasStats).length > 0 
+                ? Object.entries(entregasStats).map(([mod, cant]) => `${cant} ${mod}`).join(', ') 
+                : '0 ESTANDAR';
+                
+            let retStr = Object.keys(retirosStats).length > 0 
+                ? Object.entries(retirosStats).map(([mod, cant]) => `${cant} ${mod}`).join(', ') 
+                : '0 ESTANDAR';
+
+            let finalY = (doc.lastAutoTable ? doc.lastAutoTable.finalY : doc.autoTable.previous.finalY) + 30;
+            
+            if (finalY > 730) {
+                doc.addPage();
+                finalY = 40;
+            }
+
+            doc.setFontSize(11);
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(0, 0, 0);
+            doc.text(`-ENTREGA DE OBRA: ${entStr}`, 40, finalY);
+            doc.text(`-RETIRO DE OBRA: ${retStr}`, 40, finalY + 15);
+
+            doc.save(`Ruta_Tronos_${targetDate}.pdf`);
+            showToast("PDF GENERADO CON ÉXITO");
+        }
+
+        // ---------- NUEVO: GENERADOR DE NOTA DE SALIDA INDIVIDUAL ----------
+        function generateNotaSalidaPDF(id, subDirEnc) {
+            const item = state.database.find(x => x.id === id);
+            if(!item) return;
+
+            let cliente = item.cliente || '';
+            let fechaStr = item.fecha ? new Date(item.fecha).toLocaleDateString('es-ES', {timeZone:'UTC'}) : '';
+            let direccion = '';
+            let prods = [];
+
+            if (subDirEnc) {
+                let subDir = decodeURIComponent(subDirEnc);
+                direccion = subDir;
+                prods = (item.productos || []).filter(p => p.n_dir === subDir);
+            } else {
+                direccion = item.direccion || '';
+                prods = (item.productos || []).filter(p => !p.n_dir);
+            }
+
+            let descItems = prods.map(p => `${p.cant} SANITARIO PORTATIL MODELO ${p.modelo}`).join(', ');
+            let descripcion = `RENTA DE ${descItems}`;
+
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF('p', 'pt', 'letter');
+            
+            const margin = 40;
+            const maxW = 612 - (margin * 2); 
+            let yPos = 40;
+
+            // --- CABECERA ---
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(10);
+            doc.text("TRONOS RENTA DE BAÑOS PORTÁTILES", margin, yPos);
+            
+            yPos += 20;
+            doc.setFontSize(15);
+            doc.text("NOTA DE SALIDA POR RENTA (ORDEN DE ENTREGA)", 612/2, yPos, { align: "center" });
+            
+            yPos += 20;
+            doc.setFontSize(12);
+            doc.text("SERSA DEL SURESTE SA DE CV", 612/2, yPos, { align: "center" });
+            
+            yPos += 12;
+            doc.setFontSize(10);
+            doc.text("RFC: SSU171103GX8", 612/2, yPos, { align: "center" });
+
+            yPos += 25;
+            
+            // --- BLOQUE DE DATOS DEL CLIENTE ---
+            doc.setFontSize(10.5);
+            
+            doc.setFont("helvetica", "bold");
+            doc.text("FECHA:", margin, yPos);
+            doc.setFont("helvetica", "normal");
+            doc.text(fechaStr, margin + 50, yPos);
+            yPos += 16;
+
+            doc.setFont("helvetica", "bold");
+            doc.text("NOMBRE DEL CLIENTE:", margin, yPos);
+            doc.setFont("helvetica", "normal");
+            let splitCliente = doc.splitTextToSize(cliente, maxW - 140);
+            doc.text(splitCliente, margin + 140, yPos);
+            yPos += (splitCliente.length * 13) + 5;
+
+            doc.setFont("helvetica", "bold");
+            doc.text("DESCRIPCIÓN:", margin, yPos);
+            doc.setFont("helvetica", "normal");
+            let splitDesc = doc.splitTextToSize(descripcion, maxW - 90);
+            doc.text(splitDesc, margin + 90, yPos);
+            yPos += (splitDesc.length * 13) + 5;
+
+            doc.setFont("helvetica", "bold");
+            doc.text("DIRECCIÓN DE ENTREGA:", margin, yPos);
+            doc.setFont("helvetica", "normal");
+            let splitDir = doc.splitTextToSize(direccion, maxW - 155);
+            doc.text(splitDir, margin + 155, yPos);
+            yPos += (splitDir.length * 13) + 15;
+
+            // --- POLÍTICAS DE SERVICIO ---
+            doc.setFillColor(241, 245, 249);
+            doc.rect(margin, yPos - 12, maxW, 16, 'F');
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(11);
+            doc.text("NUESTRAS POLÍTICAS DE SERVICIO", 612/2, yPos, { align: "center" });
+            yPos += 18;
+
+            doc.setFontSize(9);
+            doc.setFont("helvetica", "normal");
+            const intro = "Para garantizarle la mejor experiencia y mantener nuestros equipos en óptimas condiciones, le solicitamos tener en cuenta los siguientes lineamientos:";
+            let splitIntro = doc.splitTextToSize(intro, maxW);
+            doc.text(splitIntro, margin, yPos);
+            yPos += (splitIntro.length * 11) + 10;
+
+            const terms = [
+                { t: "1. Acceso y Limpieza:", d: " Para poder brindarle el servicio de limpieza, el acceso al equipo sanitario no deberá estar restringido por obstáculos, zanjas o material de construcción." },
+                { t: "2. Distancia de Instalación:", d: " Para poder garantizarle un mantenimiento óptimo, el sanitario deberá instalarse a una distancia máxima de 20 metros desde el punto de acceso principal en su ubicación. De superar esta distancia, nos veremos imposibilitados para llevar a cabo el servicio de limpieza." },
+                { t: "3. Uso Adecuado:", d: " Está prohibido depositar dentro del contenedor elementos como cemento, piedras, papeles o telas; nos reservamos el derecho de no realizar la limpieza del sanitario hasta que estos residuos estén retirados." },
+                { t: "4. Tiempos de Llegada:", d: " Entendemos la dinámica de trabajo; en caso de eventualidad en su obra, nuestro operador tiene una tolerancia de 10 minutos de espera." },
+                { t: "5. Reubicación del Equipo:", d: " Si necesita realizar cualquier tipo de movimiento del equipo, favor de comunicarse al 9994427176 para mandar al personal autorizado." },
+                { t: "6. Horarios y Atención:", d: " Únicamente manejamos un horario abierto para las limpiezas de 8 AM a 5 PM. Para quejas y sugerencias, estamos a su disposición al 9999963132." },
+                { t: "7. Pausas en su Proyecto:", d: " Dado el caso en que se suspenda la obra, se deberá notificar a oficina (9994427176 o ventas@tronos.mx) para dar los días de suspensión en gracia. En caso de no notificar en formato escrito, los días de renta seguirán transcurriendo." },
+                { t: "8. Retiro del Equipo y Pagos:", d: " Los equipos solo se retiran si la cuenta no presenta algún adeudo. De lo contrario la cuenta sigue corriendo." },
+                { t: "9. Suspensión por Adeudo:", d: " A partir de 2 meses de adeudo, se suspenden los servicios de limpieza, los cuales se reactivan cuando se cubra la mensualidad." },
+                { t: "10. Responsabilidad:", d: " El cliente se hace responsable en su totalidad de cualquier anomalía, robo o extravio que le pueda suceder al equipo en el periodo de renta." },
+                { t: "11. Protección del Equipo:", d: " El costo por daños a los equipos (quemas, roturas, grafitis en su totalidad o daños en sus accesorios) tiene un costo sujeto al daño. El costo por daños totales (pérdida total del equipo por quemas o roturas) tiene un costo de $14,000 mil pesos." }
+            ];
+
+            doc.setFontSize(9);
+            terms.forEach(term => {
+                let fullStr = term.t + term.d;
+                let lines = doc.splitTextToSize(fullStr, maxW);
+                
+                doc.setFont("helvetica", "bold");
+                doc.text(term.t, margin, yPos);
+                let titleW = doc.getTextWidth(term.t);
+                
+                doc.setFont("helvetica", "normal");
+                let firstLineRest = lines[0].length >= term.t.length ? lines[0].substring(term.t.length) : "";
+                doc.text(firstLineRest, margin + titleW, yPos);
+                
+                for(let j = 1; j < lines.length; j++) {
+                    yPos += 11;
+                    doc.text(lines[j], margin, yPos);
+                }
+                yPos += 9; 
+            });
+
+            yPos += 5;
+
+            // --- CONFORMIDAD Y FIRMA ---
+            doc.setFillColor(241, 245, 249);
+            doc.rect(margin, yPos - 12, maxW, 16, 'F');
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(11);
+            doc.text("CONFORMIDAD DE ENTREGA", 612/2, yPos, { align: "center" });
+            yPos += 18;
+
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(10);
+            doc.text("Recibí equipo sanitario en buen estado con accesorios y limpios.", margin, yPos);
+            yPos += 14;
+            doc.text("Acepto de conformidad.", margin, yPos);
+            
+            yPos += 45;
+            doc.setLineWidth(0.5);
+            doc.line(612/2 - 100, yPos, 612/2 + 100, yPos);
+            doc.setFont("helvetica", "bold");
+            doc.text("NOMBRE Y FIRMA", 612/2, yPos + 12, { align: "center" });
+
+            doc.save(`Nota_Salida_${cliente.replace(/\s+/g, '_')}.pdf`);
+            showToast("NOTA DE SALIDA GENERADA");
+        }
+
+        // ---------- REPORTES ESTADÍSTICOS Y DASHBOARD GENERAL ----------
+        function renderReportes(content) {
+            const now = new Date();
+            const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
+            const currentYear = String(now.getFullYear());
+
+            content.innerHTML = `
+                <!-- Sección 1: Reportes Estadísticos -->
+                <div class="bg-white rounded-[2.5rem] p-8 shadow-sm border border-slate-200 animate-in fade-in duration-500 mb-8">
+                    <div class="flex flex-wrap items-center justify-between gap-4 mb-8">
+                        <div>
+                            <h2 class="text-3xl font-[900] text-slate-900 tracking-tighter uppercase">Reportes Estadísticos</h2>
+                            <p class="text-slate-500 text-[10px] font-black uppercase tracking-widest mt-1">Sumatoria de productos en servicios "COMPLETADOS"</p>
+                        </div>
+                        
+                        <div class="flex flex-wrap items-center gap-3">
+                            <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest w-full md:w-auto">Meses (Ctrl+Clic):</span>
+                            <select id="report_months" multiple class="bg-slate-50 border-2 border-slate-100 rounded-xl px-2 py-1 text-xs font-bold text-slate-700 outline-none focus:ring-4 focus:ring-blue-100 transition-all h-20 w-32 custom-scrollbar">
+                                <option value="01">Enero</option>
+                                <option value="02">Febrero</option>
+                                <option value="03">Marzo</option>
+                                <option value="04">Abril</option>
+                                <option value="05">Mayo</option>
+                                <option value="06">Junio</option>
+                                <option value="07">Julio</option>
+                                <option value="08">Agosto</option>
+                                <option value="09">Septiembre</option>
+                                <option value="10">Octubre</option>
+                                <option value="11">Noviembre</option>
+                                <option value="12">Diciembre</option>
+                            </select>
+                            <select id="report_year" class="bg-slate-50 border-2 border-slate-100 rounded-xl px-4 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-4 focus:ring-blue-100 transition-all self-start h-10">
+                                <option value="2024">2024</option><option value="2025">2025</option><option value="2026">2026</option>
+                                <option value="2027">2027</option><option value="2028">2028</option><option value="2029">2029</option><option value="2030">2030</option>
+                            </select>
+                            <div class="flex flex-col gap-2 self-start">
+                                <button onclick="generateStatsReport()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all shadow-md shadow-blue-100 active:scale-95 flex items-center justify-center gap-2">
+                                    <i data-lucide="bar-chart-2" class="w-4 h-4"></i> Generar
+                                </button>
+                                <button onclick="downloadStatsPDF()" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all shadow-md shadow-red-100 active:scale-95 flex items-center justify-center gap-2">
+                                    <i data-lucide="file-down" class="w-4 h-4"></i> PDF
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="report_results" class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                        <div class="md:col-span-3 py-10 text-center text-slate-300">
+                             <i data-lucide="line-chart" class="w-16 h-16 mx-auto mb-4 opacity-20"></i>
+                             <p class="font-black uppercase tracking-widest text-xs">Selecciona el periodo y presiona Generar</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sección 2: Dashboard General (Filtros y Tabla Interactiva) -->
+                <div class="mt-12 border-t-2 border-slate-200 pt-12 animate-in fade-in duration-700 delay-150">
+                    <div class="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+                        <div>
+                            <h3 class="text-3xl font-[900] uppercase text-slate-900 tracking-tighter">Dashboard General</h3>
+                            <p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Explorador y Filtro de Base de Datos</p>
+                        </div>
+                        <button onclick="exportExcel()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg flex items-center gap-2 active:scale-95">
+                            <i data-lucide="download" class="w-5 h-5"></i> Descargar Excel Filtrado
+                        </button>
+                    </div>
+
+                    <!-- Panel de Filtros Multi-Paramétricos -->
+                    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-9 gap-4 mb-8 bg-slate-50 p-6 rounded-3xl border border-slate-200 shadow-inner">
+                        <div>
+                            <label class="label-trono">Fecha (Año/Mes/Día)</label>
+                            <input type="text" id="df_date" class="input-trono bg-white" placeholder="Ej. 2026-05" oninput="updateDash()">
+                        </div>
+                        <div>
+                            <label class="label-trono">Tipo Servicio</label>
+                            <select id="df_tipo" class="input-trono bg-white" onchange="updateDash()">
+                                <option value="">TODOS</option>
+                                <option value="EVENTO">Eventos</option>
+                                <option value="ENTREGAS DE OBRA">Entregas Obra</option>
+                                <option value="RETIROS DE OBRA">Retiros Obra</option>
+                                <option value="MOVIMIENTO">Movimientos</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="label-trono">Cliente</label>
+                            <input type="text" id="df_cliente" class="input-trono bg-white" placeholder="Buscar..." oninput="updateDash()">
+                        </div>
+                        <div>
+                            <label class="label-trono">Obra / Op.</label>
+                            <input type="text" id="df_obra" class="input-trono bg-white" placeholder="Buscar..." oninput="updateDash()">
+                        </div>
+                        <div>
+                            <label class="label-trono">Modelo</label>
+                            <select id="df_mod" class="input-trono bg-white" onchange="updateDash()">
+                                <option value="">TODOS</option>
+                                ${MODELS.map(m=>`<option value="${m}">${m}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="label-trono">Cantidad</label>
+                            <input type="number" id="df_cant" class="input-trono bg-white" placeholder="Ej. 2" oninput="updateDash()">
+                        </div>
+                        <div>
+                            <label class="label-trono">Vendedor</label>
+                            <select id="df_vend" class="input-trono bg-white" onchange="updateDash()">
+                                <option value="">TODOS</option>
+                                ${VENDORS.map(v=>`<option value="${v}">${v}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="label-trono">Método Pago</label>
+                            <select id="df_pago" class="input-trono bg-white" onchange="updateDash()">
+                                <option value="">TODOS</option>
+                                ${PAYMENTS.map(p=>`<option value="${p}">${p}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="label-trono">Estatus</label>
+                            <select id="df_stat" class="input-trono bg-white" onchange="updateDash()">
+                                <option value="">TODOS</option>
+                                <option value="PENDIENTE">PENDIENTE</option>
+                                <option value="COMPLETADO">COMPLETADO</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Tabla de Resultados del Dashboard -->
+                    <div class="bg-white rounded-[2rem] border border-slate-200 overflow-x-auto shadow-sm">
+                        <table class="w-full text-left text-xs min-w-[1200px]">
+                            <thead class="bg-slate-100 text-[9px] font-black text-slate-500 uppercase tracking-widest border-b border-slate-200">
+                                <tr>
+                                    <th class="p-4 w-24">Fecha</th>
+                                    <th class="p-4 w-32">Tipo</th>
+                                    <th class="p-4 w-48">Cliente</th>
+                                    <th class="p-4 w-48">Dirección</th>
+                                    <th class="p-4 w-32">Obra / Op. / COT</th>
+                                    <th class="p-4">Productos (Cant/Mod)</th>
+                                    <th class="p-4 w-32">Pago</th>
+                                    <th class="p-4 w-32">Vendedor</th>
+                                    <th class="p-4 w-32 text-center">Estatus</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dash_body" class="divide-y divide-slate-100"></tbody>
+                            <tfoot id="dash_footer" class="bg-blue-50 border-t-2 border-blue-200 text-[10px] font-black uppercase text-slate-700"></tfoot>
+                        </table>
+                    </div>
+                </div>
+            `;
+            
+            document.getElementById('report_year').value = currentYear;
+            const monthSelect = document.getElementById('report_months');
+            Array.from(monthSelect.options).forEach(opt => {
+                if(opt.value === currentMonth) opt.selected = true;
+            });
+            
+            updateDash();
+            lucide.createIcons();
+        }
+
+        function updateDash() {
+            const date = document.getElementById('df_date').value;
+            const tipo = document.getElementById('df_tipo').value;
+            const cliente = document.getElementById('df_cliente').value.toUpperCase();
+            const obra = document.getElementById('df_obra').value.toUpperCase();
+            const mod = document.getElementById('df_mod').value;
+            const cant = document.getElementById('df_cant').value;
+            const vend = document.getElementById('df_vend').value;
+            const pago = document.getElementById('df_pago').value;
+            const stat = document.getElementById('df_stat').value;
+
+            let expandedDB = getExpandedDatabase();
+
+            window.filteredDashData = expandedDB.filter(item => {
+                let match = true;
+                if(date && !(item.fecha||'').includes(date)) match = false;
+                if(tipo && item.type !== tipo) match = false;
+                if(cliente && !(item.cliente||'').includes(cliente)) match = false;
+                if(obra && !(item.obra||'').toUpperCase().includes(obra)) match = false;
+                if(vend && (item.vendedor||'N/A') !== vend) match = false;
+                if(pago && item.pago !== pago) match = false;
+                if(stat && item.status !== stat) match = false;
+
+                if(mod || cant) {
+                    let prodMatch = false;
+                    if(item.productos) {
+                        prodMatch = item.productos.some(p => {
+                            let mMod = mod ? p.modelo === mod : true;
+                            let mCant = cant ? parseInt(p.cant) === parseInt(cant) : true;
+                            return mMod && mCant;
+                        });
+                    }
+                    if(!prodMatch) match = false;
+                }
+                return match;
+            });
+
+            window.filteredDashData.sort((a,b) => new Date(a.fecha||0) - new Date(b.fecha||0));
+
+            const tbody = document.getElementById('dash_body');
+            const tfoot = document.getElementById('dash_footer');
+            
+            if(window.filteredDashData.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="p-16 text-center text-slate-400 font-black uppercase text-xs italic tracking-widest">No hay registros que coincidan con los filtros aplicados</td></tr>';
+                tfoot.innerHTML = '';
+                return;
+            }
+
+            let sumTipo = 0, sumCliente = 0, sumObra = 0, sumProds = 0, sumPago = 0, sumVend = 0, sumStat = 0;
+
+            tbody.innerHTML = window.filteredDashData.map(item => {
+                sumTipo += item.type ? 1 : 0;
+                sumCliente += item.cliente ? 1 : 0;
+                sumObra += item.obra ? 1 : 0;
+                sumPago += item.pago ? 1 : 0;
+                sumVend += (item.vendedor && item.vendedor !== 'N/A') ? 1 : 0;
+                sumStat += item.status ? 1 : 0;
+
+                let prodsHTML = '<span class="text-[10px] text-slate-400 italic font-bold uppercase">Sin productos</span>';
+                
+                if(item.productos && item.productos.length > 0) {
+                    let itemTotal = item.productos.reduce((s, p) => {
+                        if (mod && p.modelo !== mod) return s;
+                        return s + parseInt(p.cant||0);
+                    }, 0);
+                    sumProds += itemTotal;
+                    
+                    let prodsToShow = mod ? item.productos.filter(p => p.modelo === mod) : item.productos;
+                    prodsHTML = prodsToShow.map(p => `<span class="bg-white text-slate-700 px-2 py-1 rounded-md border border-slate-200 inline-block m-0.5 shadow-sm font-black text-[9px] uppercase">${p.cant}x ${p.modelo}</span>`).join('');
+                }
+
+                let subIndicator = item._isSub ? `<span class="bg-amber-100 text-amber-700 px-2 py-0.5 rounded text-[8px] uppercase border border-amber-200 shadow-sm ml-2">Adicional</span>` : '';
+
+                let obraCotText = (item.obra || '-').toUpperCase();
+                if (item.type === 'EVENTO' && item.cot) {
+                    obraCotText = item.obra ? `${item.obra.toUpperCase()}<br>COT: ${item.cot}` : `COT: ${item.cot}`;
+                }
+
+                return `
+                    <tr class="hover:bg-slate-50 transition-colors group">
+                        <td class="p-4 align-middle font-bold text-slate-800 whitespace-nowrap">${item.fecha || 'S/F'}</td>
+                        <td class="p-4 align-middle text-[9px] font-bold text-slate-500 uppercase tracking-widest">${item.type}</td>
+                        <td class="p-4 align-middle">
+                            <div class="max-w-xs break-words whitespace-normal font-black text-slate-900 leading-tight">
+                                ${item.cliente} ${subIndicator}
+                            </div>
+                        </td>
+                        <td class="p-4 align-middle">
+                            <div class="max-w-xs break-words whitespace-normal text-xs text-slate-600 font-medium">
+                                ${item.direccion || '-'}
+                            </div>
+                        </td>
+                        <td class="p-4 align-middle text-[10px] font-bold text-amber-700 max-w-[150px] whitespace-normal break-words">${obraCotText}</td>
+                        <td class="p-4 align-middle leading-relaxed max-w-[250px] whitespace-normal">${prodsHTML}</td>
+                        <td class="p-4 align-middle font-bold text-slate-800 text-[10px]"><i data-lucide="dollar-sign" class="w-3 h-3 text-emerald-500 inline"></i> ${item.pago}</td>
+                        <td class="p-4 align-middle text-[10px] text-slate-500 uppercase font-bold"><i data-lucide="user" class="w-3 h-3 inline"></i> ${item.vendedor||'N/A'}</td>
+                        <td class="p-4 align-middle text-center"><span class="px-2 py-1 rounded-lg text-[8px] font-black uppercase tracking-widest inline-block shadow-sm border ${item.status === 'COMPLETADO' || item.status === 'LISTO' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-amber-50 text-amber-600 border-amber-200'}">${item.status}</span></td>
+                    </tr>
+                `;
+            }).join('');
+
+            tfoot.innerHTML = `
+                <tr>
+                    <td class="p-4 text-slate-400">TOTALES</td>
+                    <td class="p-4 text-blue-600">${sumTipo} Regs</td>
+                    <td class="p-4 text-blue-600">${sumCliente} Regs</td>
+                    <td class="p-4 text-blue-600">-</td>
+                    <td class="p-4 text-blue-600">${sumObra} Regs</td>
+                    <td class="p-4 text-emerald-600 font-[900] text-sm">${sumProds} UNIDS</td>
+                    <td class="p-4 text-blue-600">${sumPago} Regs</td>
+                    <td class="p-4 text-blue-600">${sumVend} Regs</td>
+                    <td class="p-4 text-blue-600 text-center">${sumStat} Regs</td>
+                </tr>
+            `;
+            
+            lucide.createIcons({root: tbody});
+        }
+
+        function exportExcel() {
+            const dataToExport = window.filteredDashData && window.filteredDashData.length > 0 
+                                 ? window.filteredDashData 
+                                 : getExpandedDatabase();
+            
+            if(dataToExport.length === 0) return showToast("No hay datos para exportar");
+
+            const modFilter = document.getElementById('df_mod')?.value || '';
+            const wsData = dataToExport.map(item => {
+                const totalUnits = item.productos ? item.productos.reduce((s, p) => {
+                    if (modFilter && p.modelo !== modFilter) return s;
+                    return s + parseInt(p.cant||0);
+                }, 0) : 0;
+                
+                let prodsToShow = item.productos || [];
+                if (modFilter) prodsToShow = prodsToShow.filter(p => p.modelo === modFilter);
+                let prodDesc = prodsToShow.map(p => p.modelo).join(', ');
+
+                let obraCotExport = item.obra ? item.obra.toUpperCase() : '';
+                if (item.type === 'EVENTO' && item.cot) {
+                    obraCotExport = item.obra ? `${item.obra.toUpperCase()} - COT: ${item.cot}` : `COT: ${item.cot}`;
+                }
+
+                let isActComp = item.status === 'COMPLETADO' || item.status === 'LISTO';
+                let contactExport = item.contacto;
+                if (item.type === 'ENTREGAS DE OBRA' && isActComp && item.cont_contrata) {
+                    contactExport = item.cont_contrata;
+                }
+
+                return {
+                    "ID ORIGEN": item.id,
+                    "ES ADICIONAL": item._isSub ? "SÍ" : "NO",
+                    "ESTADO": item.status,
+                    "TIPO": item.type,
+                    "FECHA SERVICIO": item.fecha,
+                    "CLIENTE": item.cliente,
+                    "CONTACTO": contactExport,
+                    "OBRA / OPERADOR / COT": obraCotExport,
+                    "DIRECCIÓN": item.direccion,
+                    "PAGO": item.pago,
+                    "VENDEDOR": item.vendedor,
+                    "TOTAL UNIDADES": totalUnits,
+                    "MODELO": prodDesc,
+                    "MOTIVO (Retiros)": item.motivo,
+                    "TIPO MOV": item.tipo_mov,
+                    "MAPS": item.ubicacion,
+                    "FECHA REGISTRO": new Date(item.id).toLocaleDateString('es-ES')
+                };
+            });
+
+            const ws = XLSX.utils.json_to_sheet(wsData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "BaseDeDatos_Filtrada");
+            
+            const dateStr = new Date().toISOString().split('T')[0];
+            XLSX.writeFile(wb, `TRONOS_Export_Filtrado_${dateStr}.xlsx`);
+            showToast("EXCEL GENERADO CON ÉXITO");
+        }
+
+        function generateStatsReport() {
+            const monthSelect = document.getElementById('report_months');
+            const selectedOptions = Array.from(monthSelect.selectedOptions);
+            
+            if (selectedOptions.length === 0) return showToast("Selecciona al menos un mes");
+            
+            const selectedMonths = selectedOptions.map(opt => opt.value);
+            const selectedMonthNames = selectedOptions.map(opt => opt.text);
+            const year = document.getElementById('report_year').value;
+            const resultsDiv = document.getElementById('report_results');
+            
+            const expandedDB = getExpandedDatabase();
+
+            const filteredData = expandedDB.filter(item => {
+                const isCompletado = item.status === 'COMPLETADO' || item.status === 'LISTO';
+                if (!isCompletado || !item.fecha) return false;
+                const [y, m] = item.fecha.split('-');
+                return y === year && selectedMonths.includes(m);
+            });
+
+            const eventosStats = { 'ESTANDAR': 0, 'QUEEN': 0, 'FLUSH': 0, 'INCLUYENTE': 0, 'LAVAMANOS': 0 };
+            let totalEventos = 0;
+            let monthTotalsEventos = {};
+
+            let totalEntregasObra = 0;
+            let monthTotalsEntregas = {};
+
+            const retirosStats = {};
+            let totalRetiros = 0;
+            let monthTotalsRetiros = {};
+
+            selectedMonths.forEach(m => {
+                monthTotalsEventos[m] = 0;
+                monthTotalsEntregas[m] = 0;
+                monthTotalsRetiros[m] = 0;
+            });
+
+            filteredData.forEach(item => {
+                const type = item.type.toUpperCase();
+                const m = item.fecha.split('-')[1];
+                
+                if (type === 'EVENTO') {
+                    if (item.productos) {
+                        item.productos.forEach(p => {
+                            const model = p.modelo.toUpperCase();
+                            const cant = parseInt(p.cant) || 0;
+                            if (eventosStats.hasOwnProperty(model)) {
+                                eventosStats[model] += cant;
+                                totalEventos += cant;
+                                monthTotalsEventos[m] += cant;
+                            }
+                        });
+                    }
+                } else if (type === 'ENTREGAS DE OBRA') {
+                    if (item.productos) {
+                        item.productos.forEach(p => {
+                            let cant = parseInt(p.cant) || 0;
+                            totalEntregasObra += cant;
+                            monthTotalsEntregas[m] += cant;
+                        });
+                    }
+                } else if (type === 'RETIROS DE OBRA') {
+                    const motivo = (item.motivo || 'SIN MOTIVO').toUpperCase();
+                    let cantRetiro = 0;
+                    if (item.productos) {
+                        item.productos.forEach(p => cantRetiro += (parseInt(p.cant) || 0));
+                    }
+                    retirosStats[motivo] = (retirosStats[motivo] || 0) + cantRetiro;
+                    totalRetiros += cantRetiro;
+                    monthTotalsRetiros[m] += cantRetiro;
+                }
+            });
+
+            window.lastStatsReport = {
+                months: selectedMonths,
+                monthNames: selectedMonthNames,
+                year: year,
+                totalEventos, monthTotalsEventos, eventosStats,
+                totalEntregasObra, monthTotalsEntregas,
+                totalRetiros, monthTotalsRetiros, retirosStats
+            };
+
+            function generateBreakdownHTML(totalsDict) {
+                if (selectedMonths.length <= 1) return '';
+                let prev = null;
+                let items = selectedMonths.map((m, i) => {
+                    let val = totalsDict[m] || 0;
+                    let difHTML = '';
+                    if (prev !== null) {
+                        let diff = val - prev;
+                        let color = diff > 0 ? 'text-emerald-500' : (diff < 0 ? 'text-red-500' : 'text-slate-400');
+                        let sign = diff > 0 ? '+' : '';
+                        difHTML = `<span class="${color} ml-1 font-black">(${sign}${diff})</span>`;
+                    }
+                    prev = val;
+                    return `<div class="flex justify-between items-center text-[10px] font-bold text-slate-600 border-b border-slate-100 last:border-0 py-1.5"><span>${selectedMonthNames[i]}</span> <span>${val} ${difHTML}</span></div>`;
+                }).join('');
+                return `<div class="mt-4 pt-4 border-t border-slate-200 w-full"><div class="text-[9px] font-black uppercase text-slate-400 mb-2 tracking-widest text-center">Evolución / Diferencia</div>${items}</div>`;
+            }
+
+            resultsDiv.innerHTML = `
+                <div class="bg-slate-50 border-2 border-slate-100 rounded-[2rem] p-6 animate-in slide-in-from-bottom-4 flex flex-col">
+                    <h3 class="text-blue-600 font-black text-sm mb-6 border-b-2 border-blue-100 pb-3 flex items-center gap-2 uppercase tracking-tighter">
+                        <i data-lucide="star" class="w-5 h-5"></i> EVENTOS
+                    </h3>
+                    <div class="space-y-4 mb-4">
+                        ${Object.entries(eventosStats).map(([mod, cant]) => `
+                            <div class="flex justify-between items-center text-[11px] font-black uppercase text-slate-500">
+                                <span class="bg-white px-3 py-1 rounded-lg border border-slate-200 shadow-sm">${mod}</span>
+                                <span class="text-slate-900 text-sm">${cant}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                    ${generateBreakdownHTML(monthTotalsEventos)}
+                    <div class="bg-blue-600 text-white p-4 rounded-2xl flex justify-between items-center shadow-xl shadow-blue-100 mt-auto">
+                        <span class="text-[9px] font-black uppercase tracking-widest">Cantidad Total</span>
+                        <span class="text-2xl font-black">${totalEventos}</span>
+                    </div>
+                </div>
+
+                <div class="bg-slate-50 border-2 border-slate-100 rounded-[2rem] p-6 animate-in slide-in-from-bottom-4 delay-75 flex flex-col">
+                    <h3 class="text-emerald-600 font-black text-sm mb-6 border-b-2 border-emerald-100 pb-3 flex items-center gap-2 uppercase tracking-tighter">
+                        <i data-lucide="truck" class="w-5 h-5"></i> ENTREGAS OBRA
+                    </h3>
+                    <div class="flex-grow flex flex-col justify-center items-center py-6">
+                        <span class="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] mb-2">Total Programado</span>
+                        <span class="text-6xl font-[900] text-slate-900 tracking-tighter">${totalEntregasObra}</span>
+                    </div>
+                    ${generateBreakdownHTML(monthTotalsEntregas)}
+                    <div class="bg-emerald-600 text-white p-4 rounded-2xl flex justify-between items-center shadow-xl shadow-emerald-100 mt-4">
+                        <span class="text-[9px] font-black uppercase tracking-widest">Cantidad Total</span>
+                        <span class="text-2xl font-black">${totalEntregasObra}</span>
+                    </div>
+                </div>
+
+                <div class="bg-slate-50 border-2 border-slate-100 rounded-[2rem] p-6 animate-in slide-in-from-bottom-4 delay-150 flex flex-col">
+                    <h3 class="text-red-600 font-black text-sm mb-6 border-b-2 border-red-100 pb-3 flex items-center gap-2 uppercase tracking-tighter">
+                        <i data-lucide="package-minus" class="w-5 h-5"></i> RETIROS OBRA
+                    </h3>
+                    <div class="mb-4 text-[9px] font-black text-slate-400 uppercase tracking-widest px-2">Desglose por Motivos</div>
+                    <div class="space-y-4 mb-4 flex-grow">
+                        ${Object.entries(retirosStats).length > 0 
+                            ? Object.entries(retirosStats).map(([mot, cant]) => `
+                                <div class="flex justify-between items-center text-[11px] font-black uppercase text-slate-500">
+                                    <span class="bg-white px-3 py-1 rounded-lg border border-slate-200 shadow-sm max-w-[70%] truncate">${mot}</span>
+                                    <span class="text-slate-900 text-sm">${cant}</span>
+                                </div>`).join('')
+                            : '<div class="text-center text-slate-300 text-[10px] font-black uppercase py-10 italic">No hay retiros registrados</div>'
+                        }
+                    </div>
+                    ${generateBreakdownHTML(monthTotalsRetiros)}
+                    <div class="bg-red-600 text-white p-4 rounded-2xl flex justify-between items-center shadow-xl shadow-red-100 mt-auto">
+                        <span class="text-[9px] font-black uppercase tracking-widest">Cantidad Total</span>
+                        <span class="text-2xl font-black">${totalRetiros}</span>
+                    </div>
+                </div>
+            `;
+            lucide.createIcons();
+            showToast(`Reporte Generado: ${selectedMonthNames.join(', ')} / ${year}`);
+        }
+
+        function downloadStatsPDF() {
+            if (!window.lastStatsReport) return showToast("Primero genera las sumatorias en pantalla");
+            
+            const data = window.lastStatsReport;
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF('p', 'pt', 'letter');
+            
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(16);
+            doc.text("REPORTE ESTADÍSTICO DE OPERACIONES - TRONOS", 40, 40);
+            
+            doc.setFontSize(10);
+            doc.setTextColor(100);
+            doc.text(`PERIODO: ${data.monthNames.join(', ')} ${data.year}`, 40, 55);
+            doc.setTextColor(0);
+            
+            let yPos = 80;
+
+            const drawSection = (title, total, breakdown, breakdownLabel, stats) => {
+                if (yPos > 680) {
+                    doc.addPage();
+                    yPos = 50;
+                }
+                
+                doc.setFontSize(12);
+                doc.setFont("helvetica", "bold");
+                doc.text(title, 40, yPos);
+                yPos += 15;
+                
+                doc.setFontSize(10);
+                doc.setFont("helvetica", "normal");
+                doc.text(`Total Acumulado: ${total}`, 40, yPos);
+                yPos += 20;
+
+                if (stats && Object.keys(stats).length > 0) {
+                    let hasData = false;
+                    Object.values(stats).forEach(v => { if (v > 0) hasData = true; });
+                    
+                    if (hasData) {
+                        doc.setFontSize(9);
+                        doc.setFont("helvetica", "bold");
+                        doc.text(breakdownLabel, 40, yPos);
+                        yPos += 12;
+                        doc.setFont("helvetica", "normal");
+                        Object.entries(stats).forEach(([k, v]) => {
+                            if (v > 0) {
+                                doc.text(`- ${k}: ${v}`, 50, yPos);
+                                yPos += 12;
+                            }
+                        });
+                        yPos += 5;
+                    }
+                }
+
+                if (data.months.length > 1) {
+                    doc.setFontSize(9);
+                    doc.setFont("helvetica", "bold");
+                    doc.text("Desglose Mensual (Diferencia):", 40, yPos);
+                    yPos += 12;
+                    doc.setFont("helvetica", "normal");
+                    
+                    let prev = null;
+                    data.months.forEach((m, idx) => {
+                        let val = breakdown[m] || 0;
+                        let difStr = "";
+                        if (prev !== null) {
+                            let diff = val - prev;
+                            let sign = diff >= 0 ? '+' : '';
+                            difStr = `   (${sign}${diff})`;
+                        }
+                        doc.text(`- ${data.monthNames[idx]}: ${val}${difStr}`, 50, yPos);
+                        yPos += 12;
+                        prev = val;
+                    });
+                    yPos += 5;
+                }
+                
+                doc.setDrawColor(200, 200, 200);
+                doc.setLineWidth(0.5);
+                doc.line(40, yPos, 572, yPos);
+                yPos += 20;
+            };
+
+            drawSection("EVENTOS", data.totalEventos, data.monthTotalsEventos, "Por Modelo:", data.eventosStats);
+            drawSection("ENTREGAS DE OBRA", data.totalEntregasObra, data.monthTotalsEntregas, "", null);
+            drawSection("RETIROS DE OBRA", data.totalRetiros, data.monthTotalsRetiros, "Por Motivo:", data.retirosStats);
+
+            doc.save(`Estadisticas_${data.year}.pdf`);
+            showToast("PDF ESTADÍSTICO DESCARGADO");
+        }
+
+        window.onload = function() {
+            render();
+        };
+    </script>
+    <!-- Integración con Base de Datos MySQL -->
+    <script src="db_adapter.js"></script>
+</body>
+</html>
