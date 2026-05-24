@@ -1,13 +1,14 @@
 /**
  * =========================================================================
- * TRONOS DATABASE ADAPTER (MySQL Integration) - v2.0
+ * TRONOS DATABASE ADAPTER (MySQL Integration) - v2.1
  * =========================================================================
  * Sincroniza automáticamente los datos entre localStorage (offline) y la
  * base de datos MySQL en el servidor (online). 
  *
- * ESTRATEGIA: Interceptamos localStorage.setItem para detectar cada vez que
- * la app guarda datos, y automáticamente sincronizamos con el servidor.
- * También cargamos datos del servidor al iniciar.
+ * NOTA DE DISEÑO: En index.html la variable 'state' está declarada con 'let',
+ * lo que significa que es una variable de scope global pero NO pertenece al
+ * objeto 'window'. Por ello, accedemos a ella directamente como 'state'
+ * en lugar de 'window.state'.
  */
 
 (function() {
@@ -37,7 +38,7 @@
   };
 
   // =====================================================================
-  // 2. SINCRONIZACIÓN DEBOUNCED CON EL SERVIDOR
+  // 2. SINCRONIZACIÓN CON EL SERVIDOR
   // =====================================================================
   let syncTimeout = null;
   
@@ -68,22 +69,32 @@
       return;
     }
     
+    // Verificar que 'state' esté disponible antes de sincronizar
+    if (typeof state === 'undefined') {
+      console.warn('⚠️ No se puede sincronizar: "state" no está definido aún.');
+      return;
+    }
+    
     syncInProgress = true;
     syncPending = false;
     lastSyncTime = now;
 
     try {
-      // Leer los datos actuales de localStorage
-      const database = JSON.parse(localStorage.getItem('tronos_db_v4') || '[]');
-      const preprogrammed = JSON.parse(localStorage.getItem('tronos_pre_v4') || '[]');
-      const folders = JSON.parse(localStorage.getItem('tronos_folders_v4') || '[]');
+      // Leer los datos actuales del estado en memoria
+      const databaseData = state.database || [];
+      const preprogrammedData = state.preprogrammed || [];
+      const foldersData = state.folders || [];
 
-      console.log(`🔄 Sincronizando con servidor: ${database.length} servicios, ${preprogrammed.length} pre-registros, ${folders.length} carpetas`);
+      console.log(`🔄 Sincronizando con servidor: ${databaseData.length} servicios, ${preprogrammedData.length} pre-registros, ${foldersData.length} carpetas`);
 
       const response = await fetch(`${API_URL}/api/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ database, preprogrammed, folders })
+        body: JSON.stringify({ 
+          database: databaseData, 
+          preprogrammed: preprogrammedData, 
+          folders: foldersData 
+        })
       });
 
       if (response.ok) {
@@ -147,15 +158,15 @@
         originalSetItem.call(localStorage, 'tronos_folders_v4', JSON.stringify(data.folders || []));
 
         // Actualizar el estado en memoria de la aplicación
-        if (window.state) {
-          window.state.database = data.database || [];
-          window.state.preprogrammed = data.preprogrammed || [];
-          window.state.folders = data.folders || [];
+        if (typeof state !== 'undefined') {
+          state.database = data.database || [];
+          state.preprogrammed = data.preprogrammed || [];
+          state.folders = data.folders || [];
         }
 
         // Re-renderizar la interfaz
-        if (typeof window.render === 'function') {
-          window.render();
+        if (typeof render === 'function') {
+          render();
         }
 
         console.log('✅ Datos cargados correctamente desde MySQL');
@@ -169,8 +180,8 @@
       }
     } catch (error) {
       console.error('❌ No se pudo conectar al servidor:', error.message);
-      if (typeof window.showToast === 'function') {
-        window.showToast("Modo offline - Usando almacenamiento local");
+      if (typeof showToast === 'function') {
+        showToast("Modo offline - Usando almacenamiento local");
       }
     }
   }
@@ -179,10 +190,10 @@
   // 4. INICIALIZAR CUANDO EL DOCUMENTO ESTÉ LISTO
   // =====================================================================
   function init() {
-    // Esperar a que las funciones principales de la app estén disponibles
-    if (typeof window.state === 'undefined' || typeof window.render !== 'function') {
-      // Reintentar en 200ms si la app aún no ha inicializado
-      setTimeout(init, 200);
+    // Esperar a que las variables y funciones principales de la app estén disponibles
+    if (typeof state === 'undefined' || typeof render !== 'function') {
+      // Reintentar en 150ms si la app aún no ha inicializado
+      setTimeout(init, 150);
       return;
     }
     
@@ -192,9 +203,9 @@
 
   // Usar DOMContentLoaded + setTimeout para asegurar que todo esté cargado
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => setTimeout(init, 300));
+    document.addEventListener('DOMContentLoaded', () => setTimeout(init, 200));
   } else {
-    setTimeout(init, 300);
+    setTimeout(init, 200);
   }
 
 })();
