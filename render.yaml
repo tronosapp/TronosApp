@@ -1,0 +1,36 @@
+databases:
+  - name: tronos-mysql
+    databaseName: tronos_db
+    user: tronos_user
+    plan: free
+
+services:
+  - type: web
+    name: tronos-app
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: DB_HOST
+        fromDatabase:
+          name: tronos-mysql
+          property: host
+      - key: DB_USER
+        fromDatabase:
+          name: tronos-mysql
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: tronos-mysql
+          property: password
+      - key: DB_NAME
+        fromDatabase:
+          name: tronos-mysql
+          property: database
+      - key: DB_PORT
+        fromDatabase:
+          name: tronos-mysql
+          property: port
+      - key: NODE_ENV
+        value: production
