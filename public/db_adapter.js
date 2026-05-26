@@ -2,6 +2,170 @@
  * =========================================================================
  * TRONOS DATABASE ADAPTER (MySQL Integration) - v3.0
  * =========================================================================
+ * FIX v3: tracking de pendingDeletes - detecta IDs eliminados comparando
+ * estado viejo vs nuevo en localStorage y los envia como deletedIds al
+ * servidor para borrarlos sin afectar datos de otros usuarios concurrentes.
+ */
+
+(function() {
+  'use strict';
+
+  const API_URL = window.location.origin;
+  const SYNC_KEYS = ['tronos_db_v4', 'tronos_pre_v4', 'tronos_folders_v4'];
+
+  let syncInProgress = false;
+  let syncPending = false;
+  let lastSyncTime = 0;
+  const MIN_SYNC_INTERVAL = 1000;
+
+  const pendingDeletes = {
+    services:      new Set(),
+    folders:       new Set(),
+    preprogrammed: new Set()
+  };
+
+  const KEY_TO_CATEGORY = {
+    'tronos_db_v4':      'services',
+    'tronos_folders_v4': 'folders',
+    'tronos_pre_v4':     'preprogrammed'
+  };
+
+  const originalSetItem = Storage.prototype.setItem;
+
+  Storage.prototype.setItem = function(key, value) {
+    if (SYNC_KEYS.includes(key)) {
+      try {
+        const oldArr = JSON.parse(localStorage.getItem(key) || '[]');
+        const newArr = JSON.parse(value);
+        if (Array.isArray(oldArr) && Array.isArray(newArr)) {
+          const category = KEY_TO_CATEGORY[key];
+          const newIds = new Set(newArr.map(item => String(item.id)));
+          oldArr.forEach(item => { if (item.id != null && !newIds.has(String(item.id))) pendingDeletes[category].add(item.id); });
+          newArr.forEach(item => { if (item.id != null) pendingDeletes[category].delete(item.id); });
+        }
+      } catch (e) {}
+    }
+    originalSetItem.call(this, key, value);
+    if (SYNC_KEYS.includes(key)) debouncedSync();
+  };
+
+  let syncTimeout = null;
+  function debouncedSync() {
+    if (syncTimeout) clearTimeout(syncTimeout);
+    syncTimeout = setTimeout(syncToServer, 500);
+  }
+
+  async function syncToServer() {
+    if (syncInProgress) { syncPending = true; return; }
+    const now = Date.now();
+    if (now - lastSyncTime < MIN_SYNC_INTERVAL) {
+      syncPending = true;
+      setTimeout(() => { if (syncPending) { syncPending = false; syncToServer(); } }, MIN_SYNC_INTERVAL);
+      return;
+    }
+    if (typeof state === 'undefined') return;
+
+    syncInProgress = true;
+    syncPending = false;
+    lastSyncTime = now;
+
+    const deletedIdsSnapshot = {
+      services:      Array.from(pendingDeletes.services),
+      folders:       Array.from(pendingDeletes.folders),
+      preprogrammed: Array.from(pendingDeletes.preprogrammed)
+    };
+
+    try {
+      const response = await fetch(API_URL + '/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          database:      state.database      || [],
+          preprogrammed: state.preprogrammed || [],
+          folders:       state.folders       || [],
+          deletedIds:    deletedIdsSnapshot
+        })
+      });
+
+      if (response.ok) {
+        deletedIdsSnapshot.services.forEach(id      => pendingDeletes.services.delete(id));
+        deletedIdsSnapshot.folders.forEach(id       => pendingDeletes.folders.delete(id));
+        deletedIdsSnapshot.preprogrammed.forEach(id => pendingDeletes.preprogrammed.delete(id));
+        console.log('Sincronizacion exitosa con MySQL');
+      } else {
+        console.error('Error de sincronizacion:', await response.text());
+      }
+    } catch (error) {
+      console.error('Error de conexion:', error.message);
+    } finally {
+      syncInProgress = false;
+      if (syncPending) { syncPending = false; setTimeout(syncToServer, 300); }
+    }
+  }
+
+  async function loadStateFromServer(isAutoPull = false) {
+    if (isAutoPull) {
+      if (typeof state === 'undefined') return;
+      if (state.editingId !== null || state.convertData !== null) return;
+      if (state.view === 'programar') return;
+      const activeEl = document.activeElement;
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'SELECT' || activeEl.tagName === 'TEXTAREA')) return;
+      if (document.querySelector('.fixed.inset-0')) return;
+    }
+    try {
+      const response = await fetch(API_URL + '/api/state', { headers: { 'Accept': 'application/json' } });
+      if (!response.ok) return;
+      const data = await response.json();
+
+      const serverHasData = (data.database && data.database.length > 0) ||
+                            (data.preprogrammed && data.preprogrammed.length > 0) ||
+                            (data.folders && data.folders.length > 0);
+      const localHasData = JSON.parse(localStorage.getItem('tronos_db_v4')||'[]').length > 0 ||
+                           JSON.parse(localStorage.getItem('tronos_pre_v4')||'[]').length > 0 ||
+                           JSON.parse(localStorage.getItem('tronos_folders_v4')||'[]').length > 0;
+
+      if (serverHasData) {
+        if (isAutoPull && typeof state !== 'undefined') {
+          const same = JSON.stringify(data.database||[]) === JSON.stringify(state.database||[]) &&
+                       JSON.stringify(data.preprogrammed||[]) === JSON.stringify(state.preprogrammed||[]) &&
+                       JSON.stringify(data.folders||[]) === JSON.stringify(state.folders||[]);
+          if (same) return;
+        }
+        originalSetItem.call(localStorage, 'tronos_db_v4',      JSON.stringify(data.database      || []));
+        originalSetItem.call(localStorage, 'tronos_pre_v4',     JSON.stringify(data.preprogrammed || []));
+        originalSetItem.call(localStorage, 'tronos_folders_v4', JSON.stringify(data.folders       || []));
+        if (typeof state !== 'undefined') {
+          state.database = data.database || [];
+          state.preprogrammed = data.preprogrammed || [];
+          state.folders = data.folders || [];
+        }
+        if (typeof render === 'function') render();
+      } else if (localHasData && !isAutoPull) {
+        await syncToServer();
+      }
+    } catch (error) {
+      if (!isAutoPull && typeof showToast === 'function') showToast('Modo offline - Usando almacenamiento local');
+    }
+  }
+
+  function init() {
+    if (typeof state === 'undefined' || typeof render !== 'function') { setTimeout(init, 150); return; }
+    loadStateFromServer();
+    setInterval(() => { if (document.visibilityState === 'visible') loadStateFromServer(true); }, 30000);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') loadStateFromServer(true); });
+    window.addEventListener('focus', () => loadStateFromServer(true));
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => setTimeout(init, 200));
+  } else {
+    setTimeout(init, 200);
+  }
+
+})();/**
+ * =========================================================================
+ * TRONOS DATABASE ADAPTER (MySQL Integration) - v3.0
+ * =========================================================================
  * FIX v3: Se agrego tracking de pendingDeletes para detectar automaticamente
  * que IDs fueron eliminados por el usuario (comparando estado viejo vs nuevo
  * en localStorage). Estos IDs se envian al servidor como deletedIds para
