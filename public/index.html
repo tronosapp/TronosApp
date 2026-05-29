@@ -1769,7 +1769,13 @@
                 let vendorLabel = item.type === 'RETIROS DE OBRA' ? 'Reg:' : 'Vend:';
                 let col1 = `${fDate}\nPago: ${item.pago}\n${item.vendedor && item.vendedor !== 'N/A' ? vendorLabel + ' ' + item.vendedor : ''}`;
                 if(item.cot) col1 += `\nCot: ${item.cot}`;
-                col1 += `\n[${item._routeType}]`;
+             if (item.type === 'MOVIMIENTO') {
+    let movTipo = (item.tipo_mov || 'MOVIMIENTO').toUpperCase();
+    let movHora = item.h_mov || item.hora || item._routeTime || '';
+    col1 += `\n[${movTipo}${movHora ? ' - ' + movHora : ''}]`;
+} else {
+    col1 += `\n[${item._routeType}]`;
+}
                 
                 let isActComp = item._actionCompleted !== undefined ? item._actionCompleted : (item.status === 'COMPLETADO' || item.status === 'LISTO');
                 let mainContact = item.contacto;
