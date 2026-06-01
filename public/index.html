@@ -1876,6 +1876,21 @@
                                                                                                                                                                                                                                             if (color) { data.cell.styles.fillColor = color; }
                                                                                                                                                                                                                                                         }
                                                                                                                                                                                                                                                                 },
+                    didDrawRow: function(data) {
+                        if (data.row.section === 'body') {
+                            const allRows = data.table.body;
+                            const nextRow = allRows[data.row.index + 1];
+                            if (nextRow && nextRow.raw._routeType !== data.row.raw._routeType) {
+                                const x1 = data.settings.margin.left;
+                                const x2 = data.table.width + data.settings.margin.left;
+                                const y = data.cursor.y;
+                                data.doc.setDrawColor(0, 0, 0);
+                                data.doc.setLineWidth(0.8);
+                                data.doc.line(x1, y, x2, y);
+                                data.doc.line(x1, y + 1.5, x2, y + 1.5);
+                            }
+                        }
+                    },
                 willDrawCell: function(data) {
                     if (data.row.section === 'body' && (data.column.index === 1 || data.column.index === 2)) {
                         if (!data.cell.customLines) {
