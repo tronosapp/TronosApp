@@ -1824,7 +1824,7 @@
                     col4 = `MOTIVO:\n${item.motivo}\nObra: ${(item.obra||'S/N').toUpperCase()}`;
                 }
 
-                return [col1.trim(), col2.trim(), col3.trim(), col4];
+                        const row = [col1.trim(), col2.trim(), col3.trim(), col4]; row._routeType = item._routeType || item.type; return row;
             });
 
             doc.autoTable({
@@ -1861,6 +1861,21 @@
                     3: { cellWidth: 100, halign: 'left' }
                 },
                 theme: 'grid',
+                        didParseCell: function(data) {
+                                    if (data.section === 'body') {
+                                                    var tipo = data.row.raw._routeType;
+                                                                    var colorMap = {
+                                                                                        'ENTREGA DE EVENTO': [255, 255, 255],
+                                                                                                            'ENTREGA DE OBRA':   [213, 230, 255],
+                                                                                                                                'RETIRO DE EVENTO':  [209, 240, 220],
+                                                                                                                                                    'RETIRO DE OBRA':    [255, 230, 210],
+                                                                                                                                                                        'LIMPIEZA DE EVENTO': [240, 230, 255],
+                                                                                                                                                                                            'MOVIMIENTO':        [255, 248, 210]
+                                                                                                                                                                                                            };
+                                                                                                                                                                                                                            var color = colorMap[tipo];
+                                                                                                                                                                                                                                            if (color) { data.cell.styles.fillColor = color; }
+                                                                                                                                                                                                                                                        }
+                                                                                                                                                                                                                                                                },
                 willDrawCell: function(data) {
                     if (data.row.section === 'body' && (data.column.index === 1 || data.column.index === 2)) {
                         if (!data.cell.customLines) {
