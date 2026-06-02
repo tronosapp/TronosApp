@@ -1831,7 +1831,7 @@
                 startY: 70,
                 margin: { left: 20, right: 20 },
                 head: [['FECHA / DATOS', 'CLIENTE / CONTACTO', 'DIRECCIONES Y PRODUCTOS', 'DETALLE / HORARIO']],
-                body: tableData,
+                body: tableDataWithHeaders,
                 styles: { 
                     fontSize: 8.5, 
                     font: 'helvetica', 
@@ -1862,34 +1862,17 @@
                 },
                 theme: 'grid',
                         didParseCell: function(data) {
-                                    if (data.section === 'body') {
-                                                    var tipo = data.row.raw._routeType;
-                                                                    var colorMap = {
-                                                                                        'ENTREGA DE EVENTO': [255, 255, 255],
-                                                                                                            'ENTREGA DE OBRA':   [213, 230, 255],
-                                                                                                                                'RETIRO DE EVENTO':  [209, 240, 220],
-                                                                                                                                                    'RETIRO DE OBRA':    [255, 230, 210],
-                                                                                                                                                                        'LIMPIEZA DE EVENTO': [240, 230, 255],
-                                                                                                                                                                                            'MOVIMIENTO':        [255, 248, 210]
-                                                                                                                                                                                                            };
-                                                                                                                                                                                                                            var color = colorMap[tipo];
-                                                                                                                                                                                                                                            if (color) { data.cell.styles.fillColor = color; }
-                                                                                                                                                                                                                                                        }
-                                                                                                                                                                                                                                                                },
-                    didDrawRow: function(data) {
-                        if (data.row.section === 'body') {
-                            const allRows = data.table.body;
-                            const nextRow = allRows[data.row.index + 1];
-                            if (nextRow && nextRow.raw._routeType !== data.row.raw._routeType) {
-                                const x1 = data.settings.margin.left;
-                                const x2 = data.table.width + data.settings.margin.left;
-                                const y = data.cursor.y;
-                                // Separador visible entre grupos de tipo
-                                data.doc.setFillColor(40, 40, 40);
-                                data.doc.rect(x1, y - 1.5, x2 - x1, 3.5, 'F');
-                            }
-                        }
-                    },
+                    // Encabezados de sección: fondo oscuro, texto blanco, sin datos en columnas secundarias
+                    if (data.row.raw && data.row.raw._isHeader) {
+                        data.cell.styles.fillColor = [30, 30, 30];
+                        data.cell.styles.textColor = [255, 255, 255];
+                        data.cell.styles.fontStyle = 'bold';
+                        data.cell.styles.fontSize = 10;
+                        data.cell.styles.cellPadding = { top: 5, right: 3, bottom: 5, left: 5 };
+                        if (data.column.index > 0) { data.cell.text = ['']; }
+                        return;
+                    }
+                didDrawRow: function(data) { },
                 willDrawCell: function(data) {
                     if (data.row.section === 'body' && (data.column.index === 1 || data.column.index === 2)) {
                         if (!data.cell.customLines) {
