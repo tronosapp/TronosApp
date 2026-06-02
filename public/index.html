@@ -1884,10 +1884,9 @@
                                 const x1 = data.settings.margin.left;
                                 const x2 = data.table.width + data.settings.margin.left;
                                 const y = data.cursor.y;
-                                data.doc.setDrawColor(0, 0, 0);
-                                data.doc.setLineWidth(0.8);
-                                data.doc.line(x1, y, x2, y);
-                                data.doc.line(x1, y + 1.5, x2, y + 1.5);
+                                // Separador visible entre grupos de tipo
+                                data.doc.setFillColor(40, 40, 40);
+                                data.doc.rect(x1, y - 1.5, x2 - x1, 3.5, 'F');
                             }
                         }
                     },
