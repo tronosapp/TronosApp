@@ -1827,6 +1827,27 @@
                         const row = [col1.trim(), col2.trim(), col3.trim(), col4]; row._routeType = item._routeType || item.type; return row;
             });
 
+            // Insertar encabezados de sección por tipo
+            const SECTION_LABELS = {
+                'ENTREGA DE EVENTO': 'EVENTOS',
+                'ENTREGAS DE OBRA': 'ENTREGAS DE OBRA',
+                'RETIRO DE EVENTO': 'RETIROS DE EVENTOS',
+                'RETIROS DE OBRA': 'RETIROS DE OBRA',
+                'MOVIMIENTO': 'MOVIMIENTOS',
+                'LIMPIEZA DE EVENTO': 'MOVIMIENTOS'
+            };
+            const tableDataWithHeaders = [];
+            let _lastRouteType = null;
+            tableData.forEach(function(row) {
+                if (row._routeType !== _lastRouteType) {
+                    var hRow = [SECTION_LABELS[row._routeType] || row._routeType, '', '', ''];
+                    hRow._isHeader = true;
+                    tableDataWithHeaders.push(hRow);
+                    _lastRouteType = row._routeType;
+                }
+                tableDataWithHeaders.push(row);
+            });
+
             doc.autoTable({
                 startY: 70,
                 margin: { left: 20, right: 20 },
@@ -1872,6 +1893,7 @@
                         if (data.column.index > 0) { data.cell.text = ['']; }
                         return;
                     }
+                },
                 didDrawRow: function(data) { },
                 willDrawCell: function(data) {
                     if (data.row.section === 'body' && (data.column.index === 1 || data.column.index === 2)) {
