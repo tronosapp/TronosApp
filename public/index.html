@@ -1514,8 +1514,8 @@
 
                     if (item._ref.limpiezas && showLim) {
                         item._ref.limpiezas.forEach(l => {
-                            if(l.fecha === targetDate) {
-                                groups['MOVIMIENTOS'].push({ ...item, _routeType: 'LIMPIEZA DE EVENTO', _routeTime: l.hora, _actionCompleted: isLimComp });
+                            if(l.f_l === targetDate) {
+                                groups['MOVIMIENTOS'].push({ ...item, _routeType: 'LIMPIEZA DE EVENTO', _routeTime: l.h_l_d, _actionCompleted: isLimComp });
                             }
                         });
                     }
@@ -1720,7 +1720,7 @@
 
                     if (item._ref.limpiezas && showLim) {
                         item._ref.limpiezas.forEach(l => {
-                            if(l.fecha === targetDate) { activities.push({ ...item, _routeType: 'LIMPIEZA DE EVENTO', _routeTime: l.hora, _actionCompleted: isLimComp }); }
+                            if(l.f_l === targetDate) { activities.push({ ...item, _routeType: 'LIMPIEZA DE EVENTO', _routeTime: l.h_l_d, _actionCompleted: isLimComp }); }
                         });
                     }
                 } else {
@@ -4330,8 +4330,8 @@
 
                     if (item._ref.limpiezas && showLim) {
                         item._ref.limpiezas.forEach(l => {
-                            if(l.fecha === targetDate) {
-                                groups['MOVIMIENTOS'].push({ ...item, _routeType: 'LIMPIEZA DE EVENTO', _routeTime: l.hora, _actionCompleted: isLimComp });
+                            if(l.f_l === targetDate) {
+                                groups['MOVIMIENTOS'].push({ ...item, _routeType: 'LIMPIEZA DE EVENTO', _routeTime: l.h_l_d, _actionCompleted: isLimComp });
                             }
                         });
                     }
@@ -4536,7 +4536,7 @@
 
                     if (item._ref.limpiezas && showLim) {
                         item._ref.limpiezas.forEach(l => {
-                            if(l.fecha === targetDate) { activities.push({ ...item, _routeType: 'LIMPIEZA DE EVENTO', _routeTime: l.hora, _actionCompleted: isLimComp }); }
+                            if(l.f_l === targetDate) { activities.push({ ...item, _routeType: 'LIMPIEZA DE EVENTO', _routeTime: l.h_l_d, _actionCompleted: isLimComp }); }
                         });
                     }
                 } else {
