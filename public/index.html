@@ -714,8 +714,8 @@
             div.className = 'flex items-center gap-3 bg-white p-2 pl-4 rounded-xl border border-blue-100 shadow-sm';
             div.innerHTML = `
                 <i data-lucide="droplets" class="w-4 h-4 text-blue-400"></i>
-                <input type="date" class="input-trono l_date py-2 bg-transparent border-none shadow-none focus:ring-0 text-sm" value="${lData?lData.fecha:''}" required>
-                <input type="time" class="input-trono l_time py-2 bg-transparent border-none shadow-none focus:ring-0 text-sm border-l border-slate-200 rounded-none" value="${lData?lData.hora:''}">
+                <input type="date" class="input-trono l_date py-2 bg-transparent border-none shadow-none focus:ring-0 text-sm" value="${lData?lData.f_l:''}" required>
+                <input type="time" class="input-trono l_time py-2 bg-transparent border-none shadow-none focus:ring-0 text-sm border-l border-slate-200 rounded-none" value="${lData?lData.h_l_d:''}">
                 <button type="button" onclick="this.parentElement.remove(); if(document.getElementById('limp_list').children.length===0) document.getElementById('limp_empty').classList.remove('hidden');" class="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg ml-auto transition-colors">
                     <i data-lucide="trash" class="w-4 h-4"></i>
                 </button>`;
@@ -783,9 +783,10 @@
                 entry.h_r = document.getElementById('f_h_r').value; 
                 entry.h_r_m = document.getElementById('f_h_r_m').value;
                 entry.f_r = document.getElementById('f_f_r').value;
-                entry.limpiezas = Array.from(document.querySelectorAll('#limp_list > div')).map(row => ({ 
-                    fecha: row.querySelector('.l_date').value, 
-                    hora: row.querySelector('.l_time').value 
+                entry.limpiezas = Array.from(document.querySelectorAll('#limp_list > div')).map(row => ({
+                    f_l: row.querySelector('.l_date').value,
+                    h_l_d: row.querySelector('.l_time').value,
+                    status: 'PENDIENTE'
                 }));
             }
 
@@ -3529,8 +3530,8 @@
             div.className = 'flex items-center gap-3 bg-white p-2 pl-4 rounded-xl border border-blue-100 shadow-sm';
             div.innerHTML = `
                 <i data-lucide="droplets" class="w-4 h-4 text-blue-400"></i>
-                <input type="date" class="input-trono l_date py-2 bg-transparent border-none shadow-none focus:ring-0 text-sm" value="${lData?lData.fecha:''}" required>
-                <input type="time" class="input-trono l_time py-2 bg-transparent border-none shadow-none focus:ring-0 text-sm border-l border-slate-200 rounded-none" value="${lData?lData.hora:''}">
+                <input type="date" class="input-trono l_date py-2 bg-transparent border-none shadow-none focus:ring-0 text-sm" value="${lData?lData.f_l:''}" required>
+                <input type="time" class="input-trono l_time py-2 bg-transparent border-none shadow-none focus:ring-0 text-sm border-l border-slate-200 rounded-none" value="${lData?lData.h_l_d:''}">
                 <button type="button" onclick="this.parentElement.remove(); if(document.getElementById('limp_list').children.length===0) document.getElementById('limp_empty').classList.remove('hidden');" class="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg ml-auto transition-colors">
                     <i data-lucide="trash" class="w-4 h-4"></i>
                 </button>`;
@@ -3598,9 +3599,10 @@
                 entry.h_r = document.getElementById('f_h_r').value; 
                 entry.h_r_m = document.getElementById('f_h_r_m').value;
                 entry.f_r = document.getElementById('f_f_r').value;
-                entry.limpiezas = Array.from(document.querySelectorAll('#limp_list > div')).map(row => ({ 
-                    fecha: row.querySelector('.l_date').value, 
-                    hora: row.querySelector('.l_time').value 
+                entry.limpiezas = Array.from(document.querySelectorAll('#limp_list > div')).map(row => ({
+                    f_l: row.querySelector('.l_date').value,
+                    h_l_d: row.querySelector('.l_time').value,
+                    status: 'PENDIENTE'
                 }));
             }
 
