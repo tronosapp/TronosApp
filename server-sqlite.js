@@ -35,6 +35,7 @@ function initDb() {
         pago TEXT NOT NULL DEFAULT 'Efectivo',
         cliente TEXT NOT NULL,
         contacto TEXT,
+        origen TEXT,
         status TEXT NOT NULL DEFAULT 'PRE',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -51,6 +52,7 @@ function initDb() {
         motivo TEXT,
         cliente TEXT NOT NULL,
         contacto TEXT NOT NULL,
+        origen TEXT,
         obra TEXT,
         cont_contrata TEXT,
         direccion TEXT NOT NULL,
@@ -118,7 +120,7 @@ app.get('/api/state', (req, res) => {
     const folders = foldersRows.map(f => ({ id: f.id, nombre: f.nombre, fecha: f.fecha, ruta: f.ruta }));
 
     const preRows = db.prepare('SELECT * FROM preprogrammed').all();
-    const preprogrammed = preRows.map(p => ({ id: p.id, fecha: p.fecha, pago: p.pago, cliente: p.cliente, contacto: p.contacto, status: p.status }));
+    const preprogrammed = preRows.map(p => ({ id: p.id, fecha: p.fecha, pago: p.pago, cliente: p.cliente, contacto: p.contacto, origen: p.origen, status: p.status }));
 
     const servicesRows = db.prepare('SELECT * FROM services').all();
     const productsRows = db.prepare('SELECT * FROM products').all();
@@ -138,7 +140,7 @@ app.get('/api/state', (req, res) => {
 
     const database = servicesRows.map(s => ({
       id: s.id, type: s.type, fecha: s.fecha, pago: s.pago, vendedor: s.vendedor, cot: s.cot,
-      tipo_mov: s.tipo_mov, motivo: s.motivo, cliente: s.cliente, contacto: s.contacto,
+      tipo_mov: s.tipo_mov, motivo: s.motivo, cliente: s.cliente, contacto: s.contacto, origen: s.origen,
       obra: s.obra, cont_contrata: s.cont_contrata, direccion: s.direccion, ubicacion: s.ubicacion,
       h_e: s.h_e, h_e_m: s.h_e_m, f_r: s.f_r, h_r: s.h_r, h_r_m: s.h_r_m, status: s.status,
       chk_entrega: s.chk_entrega === 1, chk_limpieza: s.chk_limpieza === 1, chk_retiro: s.chk_retiro === 1,
@@ -196,19 +198,19 @@ app.post('/api/sync', (req, res) => {
 
       // Insert/update preprogrammed
       const preStmt = db.prepare(`
-        INSERT INTO preprogrammed (id, fecha, pago, cliente, contacto, status)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET fecha=excluded.fecha, pago=excluded.pago, cliente=excluded.cliente, contacto=excluded.contacto, status=excluded.status
+        INSERT INTO preprogrammed (id, fecha, pago, cliente, contacto, origen, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET fecha=excluded.fecha, pago=excluded.pago, cliente=excluded.cliente, contacto=excluded.contacto, origen=excluded.origen, status=excluded.status
       `);
       for (const p of preprogrammed) {
-        preStmt.run(p.id, p.fecha || null, p.pago || 'Efectivo', p.cliente || '', p.contacto || null, p.status || 'PRE');
+        preStmt.run(p.id, p.fecha || null, p.pago || 'Efectivo', p.cliente || '', p.contacto || null, p.origen || null, p.status || 'PRE');
       }
 
       // Insert/update services
       const serviceStmt = db.prepare(`
-        INSERT INTO services (id, type, fecha, pago, vendedor, cot, tipo_mov, motivo, cliente, contacto, obra, cont_contrata, direccion, ubicacion, h_e, h_e_m, f_r, h_r, h_r_m, status, chk_entrega, chk_limpieza, chk_retiro, extra_status, extra_folderId, extra_chk_entrega, extra_chk_limpieza, extra_chk_retiro, folderId)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET type=excluded.type, fecha=excluded.fecha, pago=excluded.pago, vendedor=excluded.vendedor, cot=excluded.cot, tipo_mov=excluded.tipo_mov, motivo=excluded.motivo, cliente=excluded.cliente, contacto=excluded.contacto, obra=excluded.obra, cont_contrata=excluded.cont_contrata, direccion=excluded.direccion, ubicacion=excluded.ubicacion, h_e=excluded.h_e, h_e_m=excluded.h_e_m, f_r=excluded.f_r, h_r=excluded.h_r, h_r_m=excluded.h_r_m, status=excluded.status, chk_entrega=excluded.chk_entrega, chk_limpieza=excluded.chk_limpieza, chk_retiro=excluded.chk_retiro, extra_status=excluded.extra_status, extra_folderId=excluded.extra_folderId, extra_chk_entrega=excluded.extra_chk_entrega, extra_chk_limpieza=excluded.extra_chk_limpieza, extra_chk_retiro=excluded.extra_chk_retiro, folderId=excluded.folderId
+        INSERT INTO services (id, type, fecha, pago, vendedor, cot, tipo_mov, motivo, cliente, contacto, origen, obra, cont_contrata, direccion, ubicacion, h_e, h_e_m, f_r, h_r, h_r_m, status, chk_entrega, chk_limpieza, chk_retiro, extra_status, extra_folderId, extra_chk_entrega, extra_chk_limpieza, extra_chk_retiro, folderId)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET type=excluded.type, fecha=excluded.fecha, pago=excluded.pago, vendedor=excluded.vendedor, cot=excluded.cot, tipo_mov=excluded.tipo_mov, motivo=excluded.motivo, cliente=excluded.cliente, contacto=excluded.contacto, origen=excluded.origen, obra=excluded.obra, cont_contrata=excluded.cont_contrata, direccion=excluded.direccion, ubicacion=excluded.ubicacion, h_e=excluded.h_e, h_e_m=excluded.h_e_m, f_r=excluded.f_r, h_r=excluded.h_r, h_r_m=excluded.h_r_m, status=excluded.status, chk_entrega=excluded.chk_entrega, chk_limpieza=excluded.chk_limpieza, chk_retiro=excluded.chk_retiro, extra_status=excluded.extra_status, extra_folderId=excluded.extra_folderId, extra_chk_entrega=excluded.extra_chk_entrega, extra_chk_limpieza=excluded.extra_chk_limpieza, extra_chk_retiro=excluded.extra_chk_retiro, folderId=excluded.folderId
       `);
 
       const productDeleteStmt = db.prepare('DELETE FROM products WHERE service_id = ?');
@@ -227,7 +229,7 @@ app.post('/api/sync', (req, res) => {
         serviceStmt.run(
           service.id, service.type || '', service.fecha || '', service.pago || 'Efectivo',
           service.vendedor || null, service.cot || null, service.tipo_mov || null, service.motivo || null,
-          service.cliente || '', service.contacto || '', service.obra || null, service.cont_contrata || null,
+          service.cliente || '', service.contacto || '', service.origen || null, service.obra || null, service.cont_contrata || null,
           service.direccion || '', service.ubicacion || null, service.h_e || null, service.h_e_m || null,
           service.f_r || null, service.h_r || null, service.h_r_m || null, service.status || 'PENDIENTE',
           service.chk_entrega ? 1 : 0, service.chk_limpieza ? 1 : 0, service.chk_retiro ? 1 : 0,

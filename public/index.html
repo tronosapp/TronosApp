@@ -35,6 +35,7 @@
         const MODELS = ['ESTANDAR', 'QUEEN', 'FLUSH', 'INCLUYENTE', 'LAVAMANOS'];
         const PAYMENTS = ['Efectivo', 'Fiscal', 'Efectivo-PO', 'Fiscal-PO'];
         const MOV_TYPES = ['Limpieza', 'Movimiento', 'Cambio de Sanitario', 'Portacandado', 'Otro'];
+        const ORIGEN_OPTS = ['Facebook', 'Instagram', 'Página web', 'Contacto Gerente', 'Contacto Admin'];
 
         let state = {
             view: 'login',
@@ -329,6 +330,7 @@
                             <div><label class="label-trono">Método de Pago</label><select id="pre_pay" class="input-trono bg-slate-50">${PAYMENTS.map(p => `<option value="${p}">${p}</option>`).join('')}</select></div>
                             <div><label class="label-trono">Nombre del Cliente</label><input type="text" id="pre_client" class="input-trono bg-slate-50" placeholder="Ej. CONSTRUCTORA ABC"></div>
                             <div><label class="label-trono">Teléfono / Contacto</label><input type="text" id="pre_contact" class="input-trono bg-slate-50" placeholder="Ej. 999 123 4567"></div>
+                            <div><label class="label-trono">Origen</label><select id="pre_origen" class="input-trono bg-slate-50">${ORIGEN_OPTS.map(o => `<option value="${o}">${o}</option>`).join('')}</select></div>
                             <div class="flex gap-3 pt-6 border-t border-slate-100">
                                 <button onclick="savePre()" class="flex-1 bg-amber-500 text-white px-6 py-4 rounded-2xl font-bold text-xs uppercase tracking-widest hover:bg-amber-600 transition-all shadow-lg shadow-amber-200">Guardar</button>
                                 <button onclick="clearPre()" class="btn-secondary px-4"><i data-lucide="eraser" class="w-5 h-5"></i></button>
@@ -353,13 +355,14 @@
         function savePre() {
             const cliente = document.getElementById('pre_client').value.trim();
             const contacto = document.getElementById('pre_contact').value.trim();
-            
+
             const data = {
                 id: Date.now(),
                 fecha: document.getElementById('pre_date').value || '',
                 pago: document.getElementById('pre_pay').value || 'Efectivo',
                 cliente: cliente ? cliente.toUpperCase() : '',
                 contacto: contacto ? contacto.toUpperCase() : '',
+                origen: document.getElementById('pre_origen').value || '',
                 status: 'PRE'
             };
             state.preprogrammed.push(data);
@@ -369,10 +372,11 @@
             showToast("PRE-REGISTRO GUARDADO");
         }
 
-        function clearPre() { 
-            document.getElementById('pre_date').value = ''; 
-            document.getElementById('pre_client').value = ''; 
-            document.getElementById('pre_contact').value = ''; 
+        function clearPre() {
+            document.getElementById('pre_date').value = '';
+            document.getElementById('pre_client').value = '';
+            document.getElementById('pre_contact').value = '';
+            document.getElementById('pre_origen').value = ORIGEN_OPTS[0];
         }
 
         function filterPre() {
@@ -414,7 +418,7 @@
                                 <td class="p-4">
                                     <div class="font-black text-slate-900 text-sm">${p.cliente || 'SIN NOMBRE'}</div>
                                     <div class="text-[10px] text-slate-500 font-semibold mt-1 flex items-center gap-1">
-                                        <i data-lucide="phone" class="w-3 h-3"></i> ${p.contacto || 'N/A'} &bull; <span class="text-blue-500">${p.pago}</span>
+                                        <i data-lucide="phone" class="w-3 h-3"></i> ${p.contacto || 'N/A'} &bull; <span class="text-blue-500">${p.pago}</span> ${p.origen ? `&bull; <span class="text-amber-500">${p.origen}</span>` : ''}
                                     </div>
                                 </td>
                                 <td class="p-4 pr-6 text-right">
@@ -536,6 +540,7 @@
                             <div><label class="label-trono">Método de Pago</label><select id="f_p" class="input-trono bg-white">${PAYMENTS.map(p => `<option value="${p}" ${data.pago === p ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
                             ${!isMov ? `<div><label class="label-trono">${isRetiro ? 'Registró' : 'Vendedor'}</label><select id="f_v" class="input-trono bg-white">${(isRetiro ? REGISTRO_OPTS : VENDORS).map(v => `<option value="${v}" ${(data.vendedor || 'M') === v ? 'selected' : ''}>${v}</option>`).join('')}</select></div>` : ''}
                             ${isEvent ? `<div><label class="label-trono">Número de Cotización</label><input type="text" id="f_cot" value="${data.cot || ''}" class="input-trono bg-white" placeholder="Opcional"></div>` : ''}
+                            ${(isEvent || isEntrega) ? `<div><label class="label-trono">Origen</label><select id="f_origen" class="input-trono bg-white">${ORIGEN_OPTS.map(o => `<option value="${o}" ${data.origen === o ? 'selected' : ''}>${o}</option>`).join('')}</select></div>` : ''}
                             ${isMov ? `<div><label class="label-trono">Tipo de Movimiento</label><select id="f_mov_t" class="input-trono bg-white">${MOV_TYPES.map(m => `<option value="${m}" ${data.tipo_mov === m ? 'selected' : ''}>${m}</option>`).join('')}</select></div>` : ''}
                             ${isRetiro ? `<div><label class="label-trono">Motivo de Retiro</label><select id="f_motivo" class="input-trono bg-white"><option value="TO" ${data.motivo==='TO'?'selected':''}>Termino de Obra (TO)</option><option value="SUSP" ${data.motivo==='SUSP'?'selected':''}>Suspendido (SUSP)</option><option value="MP" ${data.motivo==='MP'?'selected':''}>Mal Pago (MP)</option><option value="OTRO" ${data.motivo==='OTRO'?'selected':''}>Otro</option></select></div>` : ''}
                         </div>
@@ -754,7 +759,8 @@
                 direccion: document.getElementById('f_dir').value.toUpperCase(),
                 ubicacion: document.getElementById('f_ubi').value, 
                 cot: document.getElementById('f_cot')?.value || '',
-                obra: document.getElementById('f_obra')?.value.toUpperCase() || '', 
+                obra: document.getElementById('f_obra')?.value.toUpperCase() || '',
+                origen: document.getElementById('f_origen')?.value || '',
                 motivo: document.getElementById('f_motivo')?.value || '',
                 tipo_mov: document.getElementById('f_mov_t')?.value || '', 
                 status: state.editingId ? state.database.find(x=>x.id===state.editingId).status : 'PENDIENTE', 
@@ -2525,13 +2531,14 @@
                 }
 
                 return {
-                    "ID ORIGEN": item.id,
+                    "ID": item.id,
                     "ES ADICIONAL": item._isSub ? "SÍ" : "NO",
                     "ESTADO": item.status,
                     "TIPO": item.type,
                     "FECHA SERVICIO": item.fecha,
                     "CLIENTE": item.cliente,
                     "CONTACTO": contactExport,
+                    "ORIGEN": item.origen || '',
                     "OBRA / OPERADOR / COT": obraCotExport,
                     "DIRECCIÓN": item.direccion,
                     "PAGO": item.pago,
